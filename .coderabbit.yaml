@@ -1,0 +1,48 @@
+# .coderabbit.yaml
+language: "en-US"
+
+reviews:
+  # 'assertive' ensures CodeRabbit acts strictly like a lead engineer enforcing constraints.
+  profile: "assertive"
+
+  auto_review:
+    enabled: true
+    base_branches:
+      - "dev"
+      - "main"
+
+# Feeds CodeRabbit the local intelligence rules written in our markdown files
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AI_INSTRUCTIONS.md"
+      - "DEVELOPER_GUIDE.md"
+
+  # Granular enforcement rules. CodeRabbit will flag PRs that violate these.
+  path_instructions:
+    - path: "src/controllers/**"
+      instructions: |
+        - **FATAL ERROR**: Prisma database calls are strictly BANNED here.
+        - Must strictly rely on the Service layer to execute all business logic.
+        - Must return responses explicitly using `sendSuccess` and `catchAsync` from `src/core/Controller`.
+        - Do NOT use raw try/catch blocks.
+        - Use Zod schemas to rigorously validate `req.body` and `req.query`.
+
+    - path: "src/services/**"
+      instructions: |
+        - This is the ONLY domain where business logic and `prisma` database calls should occur.
+        - **BANNED**: Do not interact with Express `req` or `res` objects explicitly here. Keep it agnostic.
+        - Only throw typed `AppError` instances wrapping `HttpStatus` and `Messages` imported from `src/core/Service`.
+        - **KISS (Keep It Simple Stupid)**: Apply strict Single Responsibility. Keep functions extremely flat by relying heavily on Guard Clauses (early returns).
+
+    - path: "src/routes/**"
+      instructions: |
+        - **CRITICAL**: Never write inline route logic (`router.post('/', (req,res) => {})`). Route to a Controller automatically.
+        - Route Paths must be perfectly RESTful, lowercase, and pluralized nouns (e.g., `/api/users`, not `/api/getUser`).
+        - **Documentation Enforcement**: Anytime a new route is added or mutated, the PR MUST include corresponding updates in `src/docs/` Swagger specifications.
+
+    - path: "src/**"
+      instructions: |
+        - **FILE NAMING**: All code files must use standard `camelCase.ts` (e.g., `userController.ts`, `authValidation.ts`).
+        - **FUNCTIONS**: Variables and functions must have descriptive, specific naming (`findActiveShops` instead of `getData`).

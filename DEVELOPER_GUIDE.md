@@ -69,6 +69,13 @@ To prevent the codebase from becoming unmaintainable over time, strictly adhere 
    - Variables must indicate their contents intuitively. Use `userShopList` instead of a generic `data`. Use `hasPendingOrder` rather than `isStatusTrue`.
 5. **Single Responsibility Functions**
    - Functions should execute exactly one architectural task. If a function is validating data, saving to a database, generating a token, and sending an email consecutively in the same massive block, it is spaghetti. Delegate out specifically formatted helper logic.
+6. **Strict RESTful Routing**
+   - Routes must use lowercase, pluralized nouns (e.g., `GET /api/shops`, `POST /api/users`). Do not use verbs in the URL path.
+7. **Documentation Enforcement**
+   - Every single new endpoint mapped in `src/routes/` MUST have a corresponding `@openapi` standard YAML block added to `src/docs/` outlining the payload and expected errors.
+8. **Best Return Practices**
+   - For successful JSON responses, return via `sendSuccess` from `src/core/Controller` to keep API structure uniform.
+   - Exceptions are allowed for non-JSON/stream/file responses, `204 No Content`, and centralized error handling paths.
 
 ## Security Overview
 

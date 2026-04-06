@@ -19,6 +19,6 @@
 - [ ] I have commented my code, particularly in hard-to-understand areas.
 - [ ] I have updated/added relevant documentation.
 
-## Releted Pull Request
+## Related Pull Request
 
 - PR Link: [PR Link]
