@@ -14,122 +14,54 @@ Router → Controller → Service → Model (Prisma)
 
 ### Layer Responsibilities
 
-| Layer | File Location | Responsibility |
-| --- | --- | --- |
-| **Router** | `src/routes/` | Define Express routes and attach controllers. No logic. |
-| **Controller** | `src/controllers/` | Handle HTTP request/response. Parse params, call services, send responses. |
-| **Service** | `src/services/` | **All business logic lives here.** Orchestrate data access via Prisma models. |
-| **Model** | `prisma/schema.prisma` | Database schema definition only. Accessed through Prisma Client. |
+| Layer          | File Location          | Responsibility                                                                                          |
+| -------------- | ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Router**     | `src/routes/`          | Define Express routes and attach controllers. Protect routes using `authMiddleware`.                    |
+| **Controller** | `src/controllers/`     | Handle HTTP request/response. Extract Zod payloads explicitly, call services, and use `apiResponse.ts`. |
+| **Service**    | `src/services/`        | **All business logic lives here.** Orchestrate data access via Prisma models.                           |
+| **Model**      | `prisma/schema.prisma` | Database schema definition only. Accessed through Prisma Client.                                        |
 
-### Rules
+### Core Rules
 
-1. **Routers** only map HTTP methods + paths to controller methods. No validation, no logic.
+1. **Routers** map HTTP paths to controller methods. Use `authenticate` and `requireRoles` from `src/middlewares`.
 2. **Controllers** must:
-   - Extract and validate input (using **Zod** schemas).
-   - Call the appropriate service method.
-   - Return an HTTP response with the correct status code.
-   - **Never** contain business logic or direct database calls.
+   - Extract and validate input using **Zod** (`req.body` → `schema.parse`).
+   - Be wrapped in `catchAsync` to automate error propagation to the global handler.
+   - Return using `sendSuccess` helper.
+   - **Crucial**: Import `Request`, `Response`, `catchAsync`, `sendSuccess`, etc. from `src/core/Controller` to avoid redundant boilerplate.
 3. **Services** must:
-   - Contain **all** business logic.
-   - Use Prisma Client for data access.
-   - Be framework-agnostic (no `req`, `res`, or Express types).
-   - Throw typed errors that controllers can catch and translate to HTTP responses.
-4. **Models** are defined in `prisma/schema.prisma`. Do **not** create standalone model files.
-5. **Documentation**: Every task **must** update the Swagger API documentation via OpenAPI/JSDoc comments above the target routes/controllers whenever an endpoint is created or modified.
+   - Throw typed errors using `AppError(Messages.REASON, HttpStatus.CODE)` for business constraints.
+   - Never use Express specific classes.
+   - **Crucial**: Import `prisma`, `AppError`, `HttpStatus`, and `Messages` entirely from `src/core/Service`.
+4. **Error Handling**: Do not write `try/catch` in controllers. Let `catchAsync` bounce errors securely to the global `errorHandler`.
+5. **No Magic Strings**: Always use `HttpStatus` and `Messages` imported from `src/constants/`.
 
 ---
 
-## Coding Standards
+## File Naming Conventions (CamelCase standard)
 
-### Early Returns
+| Type       | Pattern                   | Example                                  |
+| ---------- | ------------------------- | ---------------------------------------- |
+| Router     | `<entity>Routes.ts`       | `authRoutes.ts`, `userRoutes.ts`         |
+| Controller | `<entity>Controller.ts`   | `authController.ts`, `shopController.ts` |
+| Service    | `<entity>Service.ts`      | `authService.ts`, `userService.ts`       |
+| Validator  | `<entity>Validation.ts`   | `authValidation.ts`                      |
+| Middleware | `<name>Middleware.ts`     | `authMiddleware.ts`                      |
+| Utility    | `<name>.ts`               | `appError.ts`, `apiResponse.ts`          |
+| Core Setup | `<Name>.ts` (Capitalized) | `Controller.ts`, `Service.ts`            |
 
-Use early returns to reduce nesting and improve readability.
+## Anti-Spaghetti Rules (Strict Adherence Required)
 
-```typescript
-// ✅ GOOD
-async function getUser(id: string) {
-  if (!id) throw new AppError('ID is required', 400);
-
-  const user = await prisma.user.findUnique({ where: { id } });
-  if (!user) throw new AppError('User not found', 404);
-
-  return user;
-}
-
-// ❌ BAD
-async function getUser(id: string) {
-  if (id) {
-    const user = await prisma.user.findUnique({ where: { id } });
-    if (user) {
-      return user;
-    } else {
-      throw new AppError('User not found', 404);
-    }
-  } else {
-    throw new AppError('ID is required', 400);
-  }
-}
-```
-
-### Error Handling
-
-All async controller methods **MUST** use `try/catch` blocks.
-
-```typescript
-// ✅ GOOD
-const getUser = async (req: Request, res: Response) => {
-  try {
-    const user = await userService.findById(req.params.id);
-    return res.status(200).json(user);
-  } catch (error) {
-    return res.status(error.statusCode ?? 500).json({ message: error.message });
-  }
-};
-```
-
-### Input Validation with Zod
-
-All incoming request data **MUST** be validated with Zod schemas before being passed to a service.
-
-```typescript
-// src/validators/user.validator.ts
-import { z } from 'zod';
-
-export const CreateUserSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
-  password: z.string().min(8),
-});
-
-export type CreateUserInput = z.infer<typeof CreateUserSchema>;
-```
-
-```typescript
-// Inside a controller
-const body = CreateUserSchema.parse(req.body); // throws ZodError on failure
-const user = await userService.create(body);
-```
-
----
-
-## File Naming Conventions
-
-| Type | Pattern | Example |
-| --- | --- | --- |
-| Router | `<entity>.routes.ts` | `user.routes.ts` |
-| Controller | `<entity>.controller.ts` | `user.controller.ts` |
-| Service | `<entity>.service.ts` | `user.service.ts` |
-| Validator | `<entity>.validator.ts` | `user.validator.ts` |
-| Middleware | `<name>.middleware.ts` | `auth.middleware.ts` |
-| Utility | `<name>.util.ts` | `response.util.ts` |
-| Config | `<name>.config.ts` | `swagger.config.ts` |
+1. **Skinny Controllers, Fat Services**: Controllers merely parse input via Zod and format output using `sendSuccess`. **Zero business logic** should ever exist in a Controller.
+2. **File Decomposition**: Never generate monolithic 1000-line service files. As domains scale, aggressively segregate them vertically (e.g., `shopInventoryService.ts`, `shopMenuService.ts` instead of one giant `shopService.ts`).
+3. **Strict Layer Isolation**: `prisma` calls are heavily BANNED in Routers and Controllers. Database querying belongs exclusively within the `src/services/` layer.
+4. **Cross-Service Orchestration**: If an endpoint performs multiple complex domain tasks (creates a user, builds a shop, fires an email), do not dump 300 lines of code into one service function. Abstract them gracefully (calling `userService.create` then `emailService.send`).
+5. **No Nesting**: Rely heavily on early returns (Guard Clauses) to keep code extremely flat.
 
 ---
 
 ## Summary
 
-- **Router** → routes only.
-- **Controller** → HTTP handling + Zod validation.
-- **Service** → business logic + Prisma queries.
-- **Model** → `prisma/schema.prisma` only.
-- Use **early returns**, **try/catch**, and **Zod** everywhere.
+- Use **early returns**.
+- Automate HTTP codes via **`HttpStatus`** and strings via **`Messages`**.
+- Automate errors via **`AppError`** + **`catchAsync`**.

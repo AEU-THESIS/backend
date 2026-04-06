@@ -139,3 +139,10 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 /src/generated/prisma
+
+# IDEs and OS System Files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

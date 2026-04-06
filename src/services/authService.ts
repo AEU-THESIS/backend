@@ -1,9 +1,9 @@
-import prisma from '../config/database';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import type { LoginInput } from '../validations/authValidation';
+import { prisma, AppError, HttpStatus, Messages } from "../core/Service";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import type { LoginInput } from "../validations/authValidation";
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
+const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret";
 
 export const authService = {
   async login(data: LoginInput) {
@@ -17,12 +17,12 @@ export const authService = {
     });
 
     if (!user) {
-      throw { statusCode: 401, message: 'Invalid email or password' };
+      throw new AppError(Messages.INVALID_CREDENTIALS, HttpStatus.UNAUTHORIZED);
     }
 
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
     if (!isPasswordValid) {
-      throw { statusCode: 401, message: 'Invalid email or password' };
+      throw new AppError(Messages.INVALID_CREDENTIALS, HttpStatus.UNAUTHORIZED);
     }
 
     const roles = user.roles.map((r) => r.role.name);
@@ -35,7 +35,7 @@ export const authService = {
         roles,
       },
       JWT_SECRET,
-      { expiresIn: '8h' }
+      { expiresIn: "8h" },
     );
 
     return {
