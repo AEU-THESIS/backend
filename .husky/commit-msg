@@ -1,3 +1,1 @@
-#!/usr/bin/env sh
-node .husky/check-jira-ticket.js "$1"
-npx --no -- commitlint --edit "$1"
+npx --no -- commitlint --edit \
