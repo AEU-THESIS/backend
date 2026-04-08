@@ -6,7 +6,16 @@ if (!commitMsgFile) {
   process.exit(1);
 }
 
-const commitMsg = fs.readFileSync(commitMsgFile, "utf8");
+let commitMsg;
+try {
+  commitMsg = fs.readFileSync(commitMsgFile, "utf8");
+} catch (err) {
+  console.error(
+    `Error: Could not read commit message file at ${commitMsgFile}:`,
+    err.message,
+  );
+  process.exit(1);
+}
 
 // Regex for Jira ticket ID (e.g., ABC-123 or [ABC-123])
 const jiraTicketRegex = /[A-Z]+-[0-9]+/;
@@ -16,7 +25,6 @@ if (!jiraTicketRegex.test(commitMsg)) {
   let fdIn, fdOut;
 
   // List of potential devices to try for interactive input/output
-  // We use different paths depending on whether the shell is CMD, PowerShell, or Git Bash
   const devices =
     process.platform === "win32"
       ? ["\\\\.\\CON", "CONIN$", "CON", "/dev/tty"]
@@ -25,10 +33,18 @@ if (!jiraTicketRegex.test(commitMsg)) {
   for (const device of devices) {
     try {
       fdIn = fs.openSync(device, "r");
-      fdOut = fs.openSync(
-        device.replace("IN$", "OUT$").replace("CON", "CON"),
-        "w",
-      );
+      // For Windows devices like CONIN$, derive CONOUT$ correctly.
+      const outDevice = device.includes("IN$")
+        ? device.replace("IN$", "OUT$")
+        : device;
+
+      try {
+        fdOut = fs.openSync(outDevice, "w");
+      } catch (outErr) {
+        fs.closeSync(fdIn);
+        throw outErr;
+      }
+
       if (fdIn && fdOut) break;
     } catch (e) {
       // Continue to next device
