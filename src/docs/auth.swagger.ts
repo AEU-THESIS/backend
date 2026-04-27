@@ -46,6 +46,16 @@
  *                       type: string
  *                     user:
  *                       type: object
+ *                       properties:
+ *                         user_id:
+ *                           type: integer
+ *                           example: 1
+ *                         shop_id:
+ *                           type: integer
+ *                           example: 1
+ *                         role:
+ *                           type: string
+ *                           example: Admin
  *       400:
  *         description: Validation failed
  *       401:
