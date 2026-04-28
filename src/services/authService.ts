@@ -1,11 +1,16 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import crypto from 'crypto'
 import type { SignOptions } from 'jsonwebtoken'
 import type { LoginInput } from '../validations/authValidation'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret'
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '8h') as SignOptions['expiresIn']
+
+const hashToken = (token: string): string => {
+  return crypto.createHash('sha256').update(token).digest('hex')
+}
 
 export const authService = {
   async login(data: LoginInput) {
@@ -50,5 +55,27 @@ export const authService = {
         role,
       },
     }
+  },
+
+  async logout(token: string) {
+    const decoded = jwt.decode(token) as { exp?: number } | null
+    if (!decoded?.exp) {
+      throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+    }
+
+    const tokenHash = hashToken(token)
+    const expiresAt = new Date(decoded.exp * 1000)
+
+    await prisma.blacklistedToken.create({
+      data: { tokenHash, expiresAt },
+    })
+  },
+
+  async isTokenBlacklisted(token: string): Promise<boolean> {
+    const tokenHash = hashToken(token)
+    const entry = await prisma.blacklistedToken.findUnique({
+      where: { tokenHash },
+    })
+    return !!entry
   },
 }

@@ -3,6 +3,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken'
 import { AppError } from '../utils/appError'
 import { HttpStatus } from '../constants/httpStatus'
 import { Messages } from '../constants/messages'
+import { authService } from '../services/authService'
 
 export type AuthUser = {
   user_id: number
@@ -41,6 +42,12 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       token,
       process.env.JWT_SECRET || 'fallback-secret'
     ) as AuthTokenPayload
+
+    // Check if the token has been blacklisted (logout invalidation)
+    const isBlacklisted = await authService.isTokenBlacklisted(token)
+    if (isBlacklisted) {
+      throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+    }
 
     if (!decoded.user_id || !decoded.email || !decoded.shop_id) {
       throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
