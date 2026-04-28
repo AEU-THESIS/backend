@@ -1,47 +1,59 @@
-import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import { AppError } from "../utils/appError";
-import { HttpStatus } from "../constants/httpStatus";
-import { Messages } from "../constants/messages";
-import prisma from "../config/database";
+import { Request, Response, NextFunction } from 'express'
+import jwt, { JwtPayload } from 'jsonwebtoken'
+import { AppError } from '../utils/appError'
+import { HttpStatus } from '../constants/httpStatus'
+import { Messages } from '../constants/messages'
+
+export type AuthUser = {
+  user_id: number
+  email: string
+  shop_id: number
+  role: string | null
+}
+
+type AuthTokenPayload = JwtPayload & AuthUser
 
 declare global {
   namespace Express {
     interface Request {
-      user?: any;
+      user?: AuthUser
     }
   }
 }
 
-export const authenticate = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
-    }
+const getBearerToken = (authorizationHeader?: string) => {
+  if (!authorizationHeader?.startsWith('Bearer ')) {
+    throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+  }
 
-    const token = authHeader.split(" ")[1];
+  const token = authorizationHeader.split(' ')[1]
+  if (!token) {
+    throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+  }
+
+  return token
+}
+
+export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = getBearerToken(req.headers.authorization)
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || "fallback-secret",
-    ) as any;
+      process.env.JWT_SECRET || 'fallback-secret'
+    ) as AuthTokenPayload
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      include: { roles: { include: { role: true } } },
-    });
-
-    if (!user) {
-      throw new AppError(Messages.USER_NOT_FOUND, HttpStatus.UNAUTHORIZED);
+    if (!decoded.user_id || !decoded.email || !decoded.shop_id) {
+      throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
     }
 
-    req.user = user;
-    next();
+    req.user = {
+      user_id: decoded.user_id,
+      email: decoded.email,
+      shop_id: decoded.shop_id,
+      role: decoded.role || null,
+    }
+    next()
   } catch (error) {
-    next(error); // falls through to errorHandler
+    next(error) // falls through to errorHandler
   }
-};
+}
