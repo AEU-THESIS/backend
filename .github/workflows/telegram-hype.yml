@@ -1,0 +1,43 @@
+name: Telegram Hype Bot
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - dev
+
+jobs:
+  notify:
+    # This ensures the message ONLY sends if the PR was actually merged, not just closed
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira ID
+        id: extract_jira
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        # Scans the PR title (e.g., [AT-5]) and saves just the "AT-5" part as an output
+        run: |
+          JIRA_ID=$(echo "$PR_TITLE" | grep -oE '[A-Z]+-[0-9]+' | head -n 1 || echo "")
+          TICKET_LINE=""
+          if [ -n "$JIRA_ID" ]; then
+            TICKET_LINE="🎫 **Jira Ticket:** [$JIRA_ID](https://vorakyun.atlassian.net/browse/$JIRA_ID)"
+          fi
+          echo "ticket_line=$TICKET_LINE" >> $GITHUB_OUTPUT
+
+      - name: Send Telegram Message
+        uses: appleboy/telegram-action@221e6b684967abe813051ee4a37dd61770a83ad3 # v1.0.1
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message_thread_id: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          format: markdown
+          message: |
+            🚀 **New Feature Merged to Dev!** 🚀
+
+            👨‍💻 **Merged By:** ${{ github.event.pull_request.merged_by.login }}
+            📌 **Task:** ${{ github.event.pull_request.title }}
+            ${{ steps.extract_jira.outputs.ticket_line }}
+
+            🔗 [View the Pull Request](${{ github.event.pull_request.html_url }})
+
+            Everyone pull the latest code and check it out! 🔥
