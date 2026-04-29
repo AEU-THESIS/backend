@@ -1,10 +1,10 @@
 /**
  * @openapi
- * /api/auth/login:
+ * /api/auth/sessions:
  *   post:
  *     tags:
  *       - Auth
- *     summary: Login for staff (Admin / Cashier)
+ *     summary: Create a new session (Login)
  *     description: Authenticate a user and return a JWT token.
  *     security: []
  *     requestBody:
@@ -60,4 +60,18 @@
  *         description: Validation failed
  *       401:
  *         description: Invalid credentials
+ *
+ * /api/auth/sessions:
+ *   delete:
+ *     tags:
+ *       - Auth
+ *     summary: Terminate a session (Logout)
+ *     description: Invalidate the current session by blacklisting the token.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *       401:
+ *         description: Unauthorized
  */

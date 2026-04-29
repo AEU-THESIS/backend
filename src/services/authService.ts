@@ -66,8 +66,10 @@ export const authService = {
     const tokenHash = hashToken(token)
     const expiresAt = new Date(decoded.exp * 1000)
 
-    await prisma.blacklistedToken.create({
-      data: { tokenHash, expiresAt },
+    await prisma.blacklistedToken.upsert({
+      where: { tokenHash },
+      update: { expiresAt },
+      create: { tokenHash, expiresAt },
     })
   },
 

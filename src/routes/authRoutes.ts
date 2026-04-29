@@ -4,7 +4,7 @@ import { authenticate } from '../middlewares/authMiddleware'
 
 const router = Router()
 
-router.post('/login', authController.login)
-router.post('/logout', authenticate, authController.logout)
+router.post('/sessions', authController.login)
+router.delete('/sessions', authenticate, authController.logout)
 
 export default router
