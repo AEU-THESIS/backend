@@ -60,8 +60,6 @@
  *         description: Validation failed
  *       401:
  *         description: Invalid credentials
- *
- * /api/auth/sessions:
  *   delete:
  *     tags:
  *       - Auth
