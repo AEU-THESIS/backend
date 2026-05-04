@@ -1,5 +1,9 @@
 import { Request, Response, catchAsync, sendSuccess, Messages } from '../core/Controller'
-import { loginSchema } from '../validations/authValidation'
+import {
+  loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+} from '../validations/authValidation'
 import { authService } from '../services/authService'
 
 export const authController = {
@@ -14,5 +18,20 @@ export const authController = {
     const token = req.headers.authorization!.split(' ')[1]
     await authService.logout(token)
     return sendSuccess(res, null, Messages.LOGGED_OUT)
+  }),
+
+  forgotPassword: catchAsync(async (req: Request, res: Response) => {
+    const body = forgotPasswordSchema.parse(req.body)
+    await authService.forgotPassword(body)
+    return sendSuccess(res, null, Messages.RESET_LINK_SENT)
+  }),
+
+  resetPassword: catchAsync(async (req: Request, res: Response) => {
+    const body = resetPasswordSchema.parse({
+      ...req.body,
+      token: req.params.token,
+    })
+    await authService.resetPassword(body)
+    return sendSuccess(res, null, Messages.PASSWORD_RESET_SUCCESS)
   }),
 }

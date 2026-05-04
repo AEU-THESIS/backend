@@ -38,10 +38,7 @@ const getBearerToken = (authorizationHeader?: string) => {
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = getBearerToken(req.headers.authorization)
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'fallback-secret'
-    ) as AuthTokenPayload
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as AuthTokenPayload
 
     // Check if the token has been blacklisted (logout invalidation)
     const isBlacklisted = await authService.isTokenBlacklisted(token)
@@ -53,11 +50,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
     }
 
+    // Ensure the user still exists and is active
+    const role = await authService.ensureUserIsActive(decoded.user_id)
+
     req.user = {
       user_id: decoded.user_id,
       email: decoded.email,
       shop_id: decoded.shop_id,
-      role: decoded.role || null,
+      role,
     }
     next()
   } catch (error) {
