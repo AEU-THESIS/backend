@@ -52,8 +52,14 @@ model User {
   password     String
   pinCode      String?  @map("pin_code")
   isPinEnabled Boolean  @default(false) @map("is_pin_enabled")
+  phone        String?
+  address      String?  @db.Text
+  imageUrl     String?  @map("image_url") @db.LongText
+  isActive     Boolean  @default(true) @map("is_active")
+  employeeId   String?  @unique @map("employee_id")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
 
   shop             Shop            @relation(fields: [shopId], references: [id])
   roles            RoleUser[]
@@ -159,7 +165,7 @@ model Product {
   categoryId  Int      @map("category_id")
   name        String
   price       Decimal  @db.Decimal(10, 2)
-  imageUrl    String?  @map("image_url")
+  imageUrl    String?  @map("image_url") @db.LongText
   isAvailable Boolean  @default(true) @map("is_available")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")

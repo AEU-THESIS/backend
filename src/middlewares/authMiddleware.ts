@@ -4,6 +4,7 @@ import { AppError } from '../utils/appError'
 import { HttpStatus } from '../constants/httpStatus'
 import { Messages } from '../constants/messages'
 import { authService } from '../services/authService'
+import { prisma } from '../core/Service'
 
 export type AuthUser = {
   user_id: number
@@ -51,6 +52,16 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
     if (!decoded.user_id || !decoded.email || !decoded.shop_id) {
       throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+    }
+
+    // Ensure the user still exists and is active
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.user_id },
+      select: { isActive: true },
+    })
+
+    if (!user || !user.isActive) {
+      throw new AppError('Your account has been deactivated.', HttpStatus.UNAUTHORIZED)
     }
 
     req.user = {

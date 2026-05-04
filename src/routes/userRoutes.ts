@@ -1,14 +1,18 @@
-import { Router } from "express";
-import { userController } from "../controllers/userController";
-import { authenticate } from "../middlewares/authMiddleware";
-import { requireRoles } from "../middlewares/roleMiddleware";
+import { Router } from 'express'
+import { userController } from '../controllers/userController'
+import { authenticate } from '../middlewares/authMiddleware'
+import { requireRoles } from '../middlewares/roleMiddleware'
+import { ROLES } from '../constants/roles'
 
-const router = Router();
+const router = Router()
 
-// Protect routing
-router.use(authenticate);
+// Protect all user routes
+router.use(authenticate)
 
-// Admin-only route for creating secondary users
-router.post("/admin", requireRoles(["Admin"]), userController.createByAdmin);
+// Admin only can view, create, update, and delete staff
+router.get('/', requireRoles([ROLES.ADMIN]), userController.getStaff)
+router.post('/', requireRoles([ROLES.ADMIN]), userController.createStaff)
+router.put('/:id', requireRoles([ROLES.ADMIN]), userController.updateStaff)
+router.delete('/:id', requireRoles([ROLES.ADMIN]), userController.deleteStaff)
 
-export default router;
+export default router

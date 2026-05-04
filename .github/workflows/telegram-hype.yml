@@ -11,7 +11,7 @@ jobs:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Extract Jira ID
+      - name: Extract Jira ID & Format Line
         id: extract_jira
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -20,24 +20,34 @@ jobs:
           JIRA_ID=$(echo "$PR_TITLE" | grep -oE '[A-Z]+-[0-9]+' | head -n 1 || echo "")
           TICKET_LINE=""
           if [ -n "$JIRA_ID" ]; then
-            TICKET_LINE="🎫 **Jira Ticket:** [$JIRA_ID](https://vorakyun.atlassian.net/browse/$JIRA_ID)"
+            # Formatted in HTML to match the direct API payload
+            TICKET_LINE="🎫 <b>Jira Ticket:</b> <a href=\"https://vorakyun.atlassian.net/browse/$JIRA_ID\">$JIRA_ID</a>"
           fi
           echo "ticket_line=$TICKET_LINE" >> $GITHUB_OUTPUT
 
-      - name: Send Telegram Message
-        uses: appleboy/telegram-action@221e6b684967abe813051ee4a37dd61770a83ad3 # v1.0.1
-        with:
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message_thread_id: ${{ secrets.TELEGRAM_TOPIC_ID }}
-          format: markdown
-          message: |
-            🚀 **New Feature Merged to Dev!** 🚀
+      - name: Send Telegram Message directly via API
+        run: |
+          # Safely package the message into a JSON file
+          jq -n \
+            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --arg topic_id "${{ secrets.TELEGRAM_TOPIC_ID }}" \
+            --arg text " <b>New Feature Merged to Dev (backend)!</b> 🚀
 
-            👨‍💻 **Merged By:** ${{ github.event.pull_request.merged_by.login }}
-            📌 **Task:** ${{ github.event.pull_request.title }}
-            ${{ steps.extract_jira.outputs.ticket_line }}
+          👨‍💻 <b>Merged By:</b> ${{ github.event.pull_request.merged_by.login }}
+          📌 <b>Task:</b> ${{ github.event.pull_request.title }}
+          ${{ steps.extract_jira.outputs.ticket_line }}
 
-            🔗 [View the Pull Request](${{ github.event.pull_request.html_url }})
+          🔗 <a href=\"${{ github.event.pull_request.html_url }}\">View the Pull Request</a>
 
-            Everyone pull the latest code and check it out! 🔥
+          Everyone pull the latest code and check it out! 🔥" \
+            '{
+              chat_id: $chat_id,
+              message_thread_id: $topic_id,
+              parse_mode: "HTML",
+              text: $text
+            }' > payload.json
+            
+          # Send it straight to Telegram!
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d @payload.json

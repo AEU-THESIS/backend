@@ -1,20 +1,25 @@
-import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
-import routes from "./routes";
-import swaggerUi from "swagger-ui-express";
-import { swaggerSpec } from "./config/swagger.config";
-import { errorHandler } from "./middlewares/errorHandler";
+import express from 'express'
+import path from 'path'
+import cors from 'cors'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
+import routes from './routes'
+import swaggerUi from 'swagger-ui-express'
+import { swaggerSpec } from './config/swagger.config'
+import { errorHandler } from './middlewares/errorHandler'
 
-const app = express();
+const app = express()
 
 /**
  * -----------------------------
  * Security middlewares
  * -----------------------------
  */
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+)
 
 /**
  * -----------------------------
@@ -22,22 +27,22 @@ app.use(helmet());
  * -----------------------------
  */
 const allowList =
-  process.env.NODE_ENV === "production"
-    ? ["https://routincafe.com"] // Strict Production Domains
-    : ["http://localhost:5173", "http://localhost:3000"]; // Local / Staging React Vite ports
+  process.env.NODE_ENV === 'production'
+    ? ['https://routincafe.com'] // Strict Production Domains
+    : ['http://localhost:5173', 'http://localhost:3000'] // Local / Staging React Vite ports
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // If no origin (e.g. Server-to-Server, mobile app) or explicitly allowed
       if (!origin || allowList.includes(origin)) {
-        callback(null, true);
+        callback(null, true)
       } else {
-        callback(new Error("Blocked by CORS Policy"));
+        callback(new Error('Blocked by CORS Policy'))
       }
     },
-  }),
-);
+  })
+)
 
 /**
  * -----------------------------
@@ -51,35 +56,33 @@ const limiter = rateLimit({
   legacyHeaders: false,
   message: {
     success: false,
-    message: "Too many requests from this IP, please try again later.",
+    message: 'Too many requests from this IP, please try again later.',
   },
-});
-app.use("/api", limiter);
+})
+app.use('/api', limiter)
 
 /**
  * -----------------------------
  * Body parsing
  * -----------------------------
  */
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')))
 
 /**
  * -----------------------------
  * Request Debugging (Local Only)
  * -----------------------------
  */
-if (process.env.ENABLE_REQUEST_DEBUG === "true") {
+if (process.env.ENABLE_REQUEST_DEBUG === 'true') {
   app.use((req, _res, next) => {
-    console.log(
-      `\n[DEBUG] ${new Date().toLocaleTimeString()} | ${req.method} ${req.originalUrl}`,
-    );
+    console.log(`\n[DEBUG] ${new Date().toLocaleTimeString()} | ${req.method} ${req.originalUrl}`)
     if (req.body && Object.keys(req.body).length)
-      console.log("📦 Body:", JSON.stringify(req.body, null, 2));
-    if (req.query && Object.keys(req.query).length)
-      console.log("🔍 Query:", req.query);
-    next();
-  });
+      console.log('📦 Body:', JSON.stringify(req.body, null, 2))
+    if (req.query && Object.keys(req.query).length) console.log('🔍 Query:', req.query)
+    next()
+  })
 }
 
 /**
@@ -87,24 +90,24 @@ if (process.env.ENABLE_REQUEST_DEBUG === "true") {
  * Routes
  * -----------------------------
  */
-app.use("/api", routes);
+app.use('/api', routes)
 
 /**
  * -----------------------------
  * Health check
  * -----------------------------
  */
-app.get("/health", (_req, res) => {
-  res.status(200).json({ status: "ok" });
-});
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok' })
+})
 
 /**
  * -----------------------------
  * Swagger UI - NEVER expose in production
  * -----------------------------
  */
-if (process.env.NODE_ENV !== "production") {
-  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec))
 }
 
 /**
@@ -112,6 +115,6 @@ if (process.env.NODE_ENV !== "production") {
  * Global Error Handler
  * -----------------------------
  */
-app.use(errorHandler);
+app.use(errorHandler)
 
-export default app;
+export default app

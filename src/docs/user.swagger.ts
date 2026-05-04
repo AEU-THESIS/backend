@@ -2,43 +2,19 @@
  * @openapi
  * tags:
  *   name: User
- *   description: User management operations
+ *   description: Staff management operations
  *
- * /api/users/admin:
- *   post:
+ * /api/users:
+ *   get:
  *     tags:
  *       - User
- *     summary: Create a new user (Admin Only)
- *     description: Allows an admin to register a new user into a specific shop. Generates a temporary secure password and sends an email to the user with a 24-hour reset password link.
+ *     summary: Get all staff members for the authenticated user's shop
+ *     description: Returns a list of staff members with their roles. Passwords are excluded for security.
  *     security:
  *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - shopId
- *               - name
- *               - email
- *             properties:
- *               shopId:
- *                 type: integer
- *                 description: ID of the shop to assign this user to
- *                 example: 1
- *               name:
- *                 type: string
- *                 description: Full name of the user
- *                 example: "John Doe"
- *               email:
- *                 type: string
- *                 format: email
- *                 description: The user's valid email address
- *                 example: "johndoe@example.com"
  *     responses:
- *       201:
- *         description: User created successfully. Email sent with password reset link.
+ *       200:
+ *         description: Staff list retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -49,25 +25,92 @@
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: "Resource created successfully"
+ *                   example: "Operation successful"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       name:
+ *                         type: string
+ *                       email:
+ *                         type: string
+ *                       role:
+ *                         type: string
+ *                         nullable: true
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *       401:
+ *         description: Unauthorized (Invalid or missing JWT)
+ *       403:
+ *         description: Forbidden (Requires Admin or Manager role)
+ *
+ *   post:
+ *     tags:
+ *       - User
+ *     summary: Create a new staff member
+ *     description: Creates a new user with a random temporary password, assigns a role, and sends an account setup email with an 8-hour token link.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - roleId
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Full name of the staff member
+ *                 example: "John Doe"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: The staff member's email address
+ *                 example: "johndoe@routincafe.com"
+ *               roleId:
+ *                 type: integer
+ *                 description: ID of the role to assign (e.g. Manager, Cashier)
+ *                 example: 2
+ *     responses:
+ *       201:
+ *         description: Staff member created. Setup email sent.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Staff member created successfully. Setup email sent."
  *                 data:
  *                   type: object
  *                   properties:
  *                     id:
  *                       type: integer
- *                     shopId:
- *                       type: integer
  *                     name:
  *                       type: string
  *                     email:
+ *                       type: string
+ *                     role:
  *                       type: string
  *                     createdAt:
  *                       type: string
  *                       format: date-time
  *       400:
- *         description: Validation error or user/shop already exists
+ *         description: Validation error, duplicate email, or invalid role
  *       401:
  *         description: Unauthorized (Invalid or missing JWT)
  *       403:
- *         description: Forbidden (Requires Admin role)
+ *         description: Forbidden (Requires Admin or Manager role)
  */

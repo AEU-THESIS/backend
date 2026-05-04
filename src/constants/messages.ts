@@ -13,4 +13,11 @@ export const Messages = {
   SHOP_NOT_FOUND: 'Shop not found',
   USER_NOT_FOUND: 'User not found',
   USER_ALREADY_EXISTS: 'User with this email already exists',
+  STAFF_CREATED: 'Staff member created successfully. Setup email sent.',
+  STAFF_UPDATED: 'Staff member updated successfully',
+  STAFF_DELETED: 'Staff member deleted successfully',
+  ROLE_NOT_FOUND: 'Role not found for this shop',
+  RESET_LINK_SENT: 'Password reset link has been sent to your email',
+  PASSWORD_RESET_SUCCESS: 'Password has been reset successfully',
+  INVALID_RESET_TOKEN: 'Invalid or expired reset token',
 } as const
