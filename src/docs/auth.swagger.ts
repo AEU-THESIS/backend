@@ -75,6 +75,7 @@
  */
 
 /**
+ * @openapi
  * /api/auth/password-resets:
  *   post:
  *     tags:
@@ -127,8 +128,10 @@
  *               newPassword:
  *                 type: string
  *                 format: password
- *                 description: New password (min 6 characters)
- *                 example: newpassword123
+ *                 minLength: 8
+ *                 pattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$"
+ *                 description: New password (min 8 characters, must contain uppercase, lowercase, number, and special character)
+ *                 example: "NewPassw0rd!"
  *     responses:
  *       200:
  *         description: Password reset successfully

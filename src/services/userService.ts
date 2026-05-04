@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { CreateStaffInput } from '../validations/userValidation'
 import { emailService } from './emailService'
@@ -94,7 +95,7 @@ export const userService = {
     const existingUser = await prisma.user.findFirst({
       where: {
         email: data.email,
-        deletedAt: null,
+        isDeleted: false,
       },
     })
 
@@ -110,8 +111,8 @@ export const userService = {
       throw new AppError(Messages.ROLE_NOT_FOUND, HttpStatus.BAD_REQUEST)
     }
 
-    // Generate a temporary unguessable password
-    const randomPassword = Math.random().toString(36).slice(-12)
+    // Generate a temporary unguessable password using a secure random generator
+    const randomPassword = crypto.randomBytes(12).toString('base64url')
     const hashedPassword = await bcrypt.hash(randomPassword, 10)
 
     // Generate Employee ID: #SP-XXXX
@@ -182,7 +183,7 @@ export const userService = {
 
   async updateStaff(id: number, data: any, shopId: number) {
     const user = await prisma.user.findFirst({
-      where: { id, shopId },
+      where: { id, shopId, isDeleted: false },
     })
 
     if (!user) {
@@ -193,7 +194,7 @@ export const userService = {
       const existingUser = await prisma.user.findFirst({
         where: {
           email: data.email,
-          deletedAt: null,
+          isDeleted: false,
         },
       })
       if (existingUser) {
@@ -210,39 +211,8 @@ export const userService = {
       isActive: data.isActive,
     }
 
-    // If the image was removed or changed, delete the old image file
-    if (user.imageUrl && user.imageUrl !== data.imageUrl) {
-      try {
-        console.log('[UserService] Detecting image change/removal.')
-        console.log(`[UserService] Old Image: ${user.imageUrl} | New Image: ${data.imageUrl}`)
-
-        const uploadsDir = path.resolve(__dirname, '../../public/uploads')
-        const oldFileName = path.basename(user.imageUrl)
-        const oldFilePath = path.join(uploadsDir, oldFileName)
-
-        console.log(`[UserService] Attempting to delete: ${oldFilePath}`)
-
-        // Security check: ensure the resolved path is inside the uploads directory
-        // and we only delete if the original URL actually pointed to our uploads
-        if (user.imageUrl.startsWith('/uploads/') && oldFilePath.startsWith(uploadsDir)) {
-          if (fs.existsSync(oldFilePath)) {
-            fs.unlinkSync(oldFilePath)
-            console.log('[UserService] Successfully deleted old image from file system.')
-          } else {
-            console.log('[UserService] File does not exist, nothing to delete.')
-          }
-        } else {
-          console.log(
-            '[UserService] Skipping deletion: path is outside uploads directory or external.'
-          )
-        }
-      } catch (err) {
-        console.error('[UserService] Failed to delete old image:', err)
-      }
-    }
-
-    return await prisma.$transaction(async tx => {
-      const updatedUser = await tx.user.update({
+    const updatedUser = await prisma.$transaction(async tx => {
+      const userResult = await tx.user.update({
         where: { id },
         data: updateData,
       })
@@ -267,13 +237,32 @@ export const userService = {
         })
       }
 
-      return updatedUser
+      return userResult
     })
+
+    // If the image was removed or changed, delete the old image file AFTER successful transaction
+    if (user.imageUrl && user.imageUrl !== data.imageUrl) {
+      try {
+        const uploadsDir = path.resolve(__dirname, '../../public/uploads')
+        const oldFileName = path.basename(user.imageUrl)
+        const oldFilePath = path.join(uploadsDir, oldFileName)
+
+        if (user.imageUrl.startsWith('/uploads/') && oldFilePath.startsWith(uploadsDir)) {
+          if (fs.existsSync(oldFilePath)) {
+            fs.unlinkSync(oldFilePath)
+          }
+        }
+      } catch (err) {
+        console.error('[UserService] Best-effort image deletion failed:', err)
+      }
+    }
+
+    return updatedUser
   },
 
   async deleteStaff(id: number, shopId: number) {
     const user = await prisma.user.findFirst({
-      where: { id, shopId },
+      where: { id, shopId, isDeleted: false },
     })
 
     if (!user) {
@@ -285,6 +274,7 @@ export const userService = {
       data: {
         isActive: false,
         deletedAt: new Date(),
+        isDeleted: true,
       },
     })
   },

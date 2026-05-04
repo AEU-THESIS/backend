@@ -104,6 +104,7 @@
  *                       type: string
  *                     role:
  *                       type: string
+ *                       nullable: true
  *                     createdAt:
  *                       type: string
  *                       format: date-time

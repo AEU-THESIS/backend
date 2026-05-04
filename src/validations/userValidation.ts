@@ -22,6 +22,7 @@ export type CreateStaffInput = z.infer<typeof createStaffSchema>
 
 export const updateStaffSchema = createStaffSchema.partial().extend({
   roleId: z.number().int().positive().optional(),
+  isActive: z.boolean().optional(),
 })
 
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>

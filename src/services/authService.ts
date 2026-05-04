@@ -22,10 +22,10 @@ const hashToken = (token: string): string => {
 
 export const authService = {
   async login(data: LoginInput) {
-    const user = await prisma.user.findFirst({
+    const users = await prisma.user.findMany({
       where: {
         email: data.email,
-        deletedAt: null,
+        isDeleted: false,
       },
       include: {
         roles: {
@@ -34,9 +34,17 @@ export const authService = {
       },
     })
 
-    if (!user) {
+    if (users.length === 0) {
       throw new AppError(Messages.INVALID_CREDENTIALS, HttpStatus.UNAUTHORIZED)
     }
+
+    if (users.length > 1) {
+      // This should be impossible with the new DB constraints, but we handle it as a safety gate
+      console.error(`CRITICAL: Multiple active users found for email: ${data.email}`)
+      throw new AppError(Messages.INVALID_CREDENTIALS, HttpStatus.UNAUTHORIZED)
+    }
+
+    const user = users[0]
 
     if (!user.isActive) {
       throw new AppError(Messages.ACCOUNT_DEACTIVATED, HttpStatus.FORBIDDEN)
@@ -159,10 +167,28 @@ export const authService = {
 
     // 2. Perform update and blacklist in a transaction
     await prisma.$transaction(async tx => {
+      // 1. Re-verify user status inside the transaction to prevent race conditions
+      // (e.g. account deleted/deactivated after token issuance)
+      const currentUser = await tx.user.findFirst({
+        where: {
+          id: decoded.userId,
+          deletedAt: null,
+          isDeleted: false,
+        },
+      })
+
+      if (!currentUser) {
+        throw new AppError(Messages.USER_NOT_FOUND, HttpStatus.NOT_FOUND)
+      }
+
+      if (!currentUser.isActive) {
+        throw new AppError(Messages.ACCOUNT_DEACTIVATED, HttpStatus.FORBIDDEN)
+      }
+
       const tokenHash = hashToken(data.token)
       const expiresAt = new Date(decoded.exp * 1000)
 
-      // 1. Atomic blacklist gate: creation will fail if token already used
+      // 2. Atomic blacklist gate: creation will fail if token already used
       try {
         await tx.blacklistedToken.create({
           data: {
@@ -178,7 +204,7 @@ export const authService = {
         throw error
       }
 
-      // 2. Update user password
+      // 3. Update user password
       await tx.user.update({
         where: { id: decoded.userId },
         data: { password: hashedPassword },

@@ -15,6 +15,20 @@ const transporter = nodemailer.createTransport({
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 const FROM = process.env.SMTP_FROM || 'RoutinCafe <no-reply@routincafe.com>'
 
+/**
+ * Escapes special characters for HTML to prevent XSS/Injection.
+ */
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  }
+  return text.replace(/[&<>"']/g, m => map[m])
+}
+
 export const emailService = {
   /**
    * Sends an account setup email to a newly created staff member.
@@ -22,6 +36,7 @@ export const emailService = {
    */
   async sendAccountSetupEmail(email: string, name: string, token: string) {
     const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`
+    const escapedName = escapeHtml(name)
 
     try {
       await transporter.sendMail({
@@ -30,7 +45,7 @@ export const emailService = {
         subject: 'Welcome to RoutinCafe — Set Your Password',
         html: `
           <div style="font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-            <h2 style="color: #33251d; margin-bottom: 8px;">Welcome, ${name}!</h2>
+            <h2 style="color: #33251d; margin-bottom: 8px;">Welcome, ${escapedName}!</h2>
             <p style="color: #555; line-height: 1.6;">
               You have been added as a team member at <strong>RoutinCafe</strong>.
               Please click the button below to set your password and activate your account.

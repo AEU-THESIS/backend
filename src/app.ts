@@ -39,7 +39,7 @@ app.use(
       if (!origin || allowList.includes(origin)) {
         callback(null, true)
       } else {
-        callback(new Error('Blocked by CORS Policy'))
+        callback(null, false)
       }
     },
   })
@@ -78,7 +78,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')))
  */
 if (process.env.ENABLE_REQUEST_DEBUG === 'true') {
   app.use((req, _res, next) => {
-    console.log(`\n[DEBUG] ${new Date().toLocaleTimeString()} | ${req.method} ${req.originalUrl}`)
+    console.log(`\n[DEBUG] ${new Date().toLocaleTimeString()} | ${req.method} ${req.path}`)
     if (req.body && Object.keys(req.body).length) {
       const sanitizedBody = redactSensitiveFields(req.body)
       console.log('📦 Body:', JSON.stringify(sanitizedBody, null, 2))
