@@ -42,7 +42,7 @@
  *       403:
  *         description: Forbidden (Requires Admin Role)
  *
- * /api/shop/settings:
+ * /api/shops/settings:
  *   get:
  *     tags:
  *       - Shop
@@ -72,10 +72,15 @@
  *         application/json:
  *           schema:
  *             type: object
+ *             minProperties: 1
+ *             additionalProperties: false
  *             properties:
  *               name:
  *                 type: string
  *               ownerName:
+ *                 type: string
+ *                 nullable: true
+ *               owner_name:
  *                 type: string
  *                 nullable: true
  *               phone:
@@ -92,17 +97,32 @@
  *                 nullable: true
  *               currencySymbol:
  *                 type: string
+ *               currency_symbol:
+ *                 type: string
  *               exchangeRate:
- *                 type: number
- *                 format: decimal
- *                 minimum: 0
- *                 exclusiveMinimum: true
+ *                 oneOf:
+ *                   - type: number
+ *                     format: decimal
+ *                     minimum: 0
+ *                     exclusiveMinimum: true
+ *                     maximum: 99999999.99
+ *                     multipleOf: 0.01
+ *                   - type: string
+ *                     pattern: '^\\d+(\\.\\d{1,2})?$'
  *               exchange_rate:
- *                 type: number
- *                 format: decimal
- *                 minimum: 0
- *                 exclusiveMinimum: true
+ *                 oneOf:
+ *                   - type: number
+ *                     format: decimal
+ *                     minimum: 0
+ *                     exclusiveMinimum: true
+ *                     maximum: 99999999.99
+ *                     multipleOf: 0.01
+ *                   - type: string
+ *                     pattern: '^\\d+(\\.\\d{1,2})?$'
  *               receiptFooter:
+ *                 type: string
+ *                 nullable: true
+ *               receipt_footer:
  *                 type: string
  *                 nullable: true
  *     responses:

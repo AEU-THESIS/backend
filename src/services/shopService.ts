@@ -23,7 +23,7 @@ export const shopService = {
     })
 
     if (existing) {
-      throw new AppError('Shop slug already exists', HttpStatus.BAD_REQUEST)
+      throw new AppError(Messages.SHOP_SLUG_EXISTS, HttpStatus.BAD_REQUEST)
     }
 
     const shop = await prisma.shop.create({
@@ -51,19 +51,18 @@ export const shopService = {
   },
 
   async updateSettings(shopId: number, data: UpdateShopSettingsInput) {
-    const existing = await prisma.shop.findUnique({
-      where: { id: shopId },
-      select: { id: true },
-    })
+    try {
+      return await prisma.shop.update({
+        where: { id: shopId },
+        data,
+        select: shopSettingsSelect,
+      })
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2025') {
+        throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+      }
 
-    if (!existing) {
-      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+      throw error
     }
-
-    return prisma.shop.update({
-      where: { id: shopId },
-      data,
-      select: shopSettingsSelect,
-    })
   },
 }

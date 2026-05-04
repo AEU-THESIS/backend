@@ -4,7 +4,13 @@ const optionalText = z.string().trim().nullable().optional()
 
 const decimalSchema = z
   .union([
-    z.number().finite('Exchange rate must be a valid number'),
+    z
+      .number()
+      .finite('Exchange rate must be a valid number')
+      .refine(
+        value => Number.isInteger(value) || /^\d+\.\d{1,2}$/.test(value.toString()),
+        'Exchange rate must have at most 2 decimal places'
+      ),
     z
       .string()
       .trim()
@@ -14,17 +20,19 @@ const decimalSchema = z
   .refine(value => value > 0, 'Exchange rate must be greater than 0')
   .refine(value => value <= 99999999.99, 'Exchange rate is too large')
 
-export const createShopSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  slug: z
-    .string()
-    .min(1, 'Slug is required')
-    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric and dashes only'),
-  ownerName: z.string().optional(),
-  phone: z.string().optional(),
-  address: z.string().optional(),
-  currencySymbol: z.string().default('$'),
-})
+export const createShopSchema = z
+  .object({
+    name: z.string().min(1, 'Name is required'),
+    slug: z
+      .string()
+      .min(1, 'Slug is required')
+      .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric and dashes only'),
+    ownerName: z.string().optional(),
+    phone: z.string().optional(),
+    address: z.string().optional(),
+    currencySymbol: z.string().default('$'),
+  })
+  .strict()
 
 export const updateShopSettingsSchema = z
   .object({
@@ -43,6 +51,25 @@ export const updateShopSettingsSchema = z
     receipt_footer: optionalText,
   })
   .strict()
+  .superRefine((data, ctx) => {
+    const aliasPairs = [
+      ['ownerName', 'owner_name'],
+      ['bakongAccountId', 'bakong_account_id'],
+      ['currencySymbol', 'currency_symbol'],
+      ['exchangeRate', 'exchange_rate'],
+      ['receiptFooter', 'receipt_footer'],
+    ] as const
+
+    for (const [camelCaseKey, snakeCaseKey] of aliasPairs) {
+      if (data[camelCaseKey] !== undefined && data[snakeCaseKey] !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [snakeCaseKey],
+          message: `Use either ${camelCaseKey} or ${snakeCaseKey}, not both`,
+        })
+      }
+    }
+  })
   .transform(data => ({
     ...(data.name !== undefined && { name: data.name }),
     ...(data.ownerName !== undefined && { ownerName: data.ownerName }),
