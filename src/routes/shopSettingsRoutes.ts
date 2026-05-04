@@ -6,9 +6,8 @@ import { requireRoles } from '../middlewares/roleMiddleware'
 const router = Router()
 
 router.use(authenticate)
-router.use(requireRoles(['Admin']))
 
-router.get('/settings', shopController.getSettings)
-router.put('/settings', shopController.updateSettings)
+router.get('/', requireRoles(['Admin']), shopController.getSettings)
+router.put('/', requireRoles(['Admin']), shopController.updateSettings)
 
 export default router

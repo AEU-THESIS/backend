@@ -26,11 +26,19 @@ export const shopService = {
       throw new AppError(Messages.SHOP_SLUG_EXISTS, HttpStatus.BAD_REQUEST)
     }
 
-    const shop = await prisma.shop.create({
-      data,
-    })
+    try {
+      const shop = await prisma.shop.create({
+        data,
+      })
 
-    return shop
+      return shop
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2002') {
+        throw new AppError(Messages.SHOP_SLUG_EXISTS, HttpStatus.BAD_REQUEST)
+      }
+
+      throw error
+    }
   },
 
   async getAll() {
