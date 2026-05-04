@@ -7,6 +7,7 @@ import routes from './routes'
 import swaggerUi from 'swagger-ui-express'
 import { swaggerSpec } from './config/swagger.config'
 import { errorHandler } from './middlewares/errorHandler'
+import { redactSensitiveFields } from './utils/sanitizer'
 
 const app = express()
 
@@ -78,9 +79,14 @@ app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')))
 if (process.env.ENABLE_REQUEST_DEBUG === 'true') {
   app.use((req, _res, next) => {
     console.log(`\n[DEBUG] ${new Date().toLocaleTimeString()} | ${req.method} ${req.originalUrl}`)
-    if (req.body && Object.keys(req.body).length)
-      console.log('📦 Body:', JSON.stringify(req.body, null, 2))
-    if (req.query && Object.keys(req.query).length) console.log('🔍 Query:', req.query)
+    if (req.body && Object.keys(req.body).length) {
+      const sanitizedBody = redactSensitiveFields(req.body)
+      console.log('📦 Body:', JSON.stringify(sanitizedBody, null, 2))
+    }
+    if (req.query && Object.keys(req.query).length) {
+      const sanitizedQuery = redactSensitiveFields(req.query)
+      console.log('🔍 Query:', sanitizedQuery)
+    }
     next()
   })
 }

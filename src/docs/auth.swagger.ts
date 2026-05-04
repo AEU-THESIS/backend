@@ -75,8 +75,7 @@
  */
 
 /**
- * @openapi
- * /api/auth/forgot-password:
+ * /api/auth/password-resets:
  *   post:
  *     tags:
  *       - Auth
@@ -102,13 +101,20 @@
  *       400:
  *         description: Validation failed
  *
- * /api/auth/reset-password:
- *   post:
+ * /api/auth/password-resets/{token}:
+ *   put:
  *     tags:
  *       - Auth
  *     summary: Reset password using a token
  *     description: Verifies the JWT token from the email link and sets the new password. Used by both account setup and forgot password flows.
  *     security: []
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: JWT token from the email link
  *     requestBody:
  *       required: true
  *       content:
@@ -116,12 +122,8 @@
  *           schema:
  *             type: object
  *             required:
- *               - token
  *               - newPassword
  *             properties:
- *               token:
- *                 type: string
- *                 description: JWT token from the email link
  *               newPassword:
  *                 type: string
  *                 format: password

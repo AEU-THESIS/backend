@@ -20,4 +20,6 @@ export const Messages = {
   RESET_LINK_SENT: 'Password reset link has been sent to your email',
   PASSWORD_RESET_SUCCESS: 'Password has been reset successfully',
   INVALID_RESET_TOKEN: 'Invalid or expired reset token',
+  ACCOUNT_DEACTIVATED: 'Your account has been deactivated. Please contact an administrator.',
+  INVALID_SHOP_SCOPE: 'Invalid shop scope provided',
 } as const

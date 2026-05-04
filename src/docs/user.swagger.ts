@@ -11,7 +11,7 @@
  *     summary: Get all staff members for the authenticated user's shop
  *     description: Returns a list of staff members with their roles. Passwords are excluded for security.
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Staff list retrieved successfully
@@ -46,7 +46,7 @@
  *       401:
  *         description: Unauthorized (Invalid or missing JWT)
  *       403:
- *         description: Forbidden (Requires Admin or Manager role)
+ *         description: Forbidden (Admin-only)
  *
  *   post:
  *     tags:
@@ -54,7 +54,7 @@
  *     summary: Create a new staff member
  *     description: Creates a new user with a random temporary password, assigns a role, and sends an account setup email with an 8-hour token link.
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -112,5 +112,5 @@
  *       401:
  *         description: Unauthorized (Invalid or missing JWT)
  *       403:
- *         description: Forbidden (Requires Admin or Manager role)
+ *         description: Forbidden (Admin-only)
  */

@@ -50,14 +50,20 @@ export const processImage = async (buffer: Buffer): Promise<string> => {
 export const deleteImage = (imageUrl: string): void => {
   if (!imageUrl || !imageUrl.startsWith('/uploads/')) return
 
-  const filename = imageUrl.replace('/uploads/', '')
-  const filepath = path.join(uploadDir, filename)
+  const filename = path.basename(imageUrl)
+  const resolvedPath = path.resolve(uploadDir, filename)
 
-  if (fs.existsSync(filepath)) {
+  // Security check: ensure the resolved path is strictly within the upload directory
+  if (!resolvedPath.startsWith(path.resolve(uploadDir))) {
+    console.warn(`Blocked deletion attempt for path outside uploads: ${resolvedPath}`)
+    return
+  }
+
+  if (fs.existsSync(resolvedPath)) {
     try {
-      fs.unlinkSync(filepath)
+      fs.unlinkSync(resolvedPath)
     } catch (err) {
-      console.error(`Failed to delete image ${filepath}:`, err)
+      console.error(`Failed to delete image ${resolvedPath}:`, err)
     }
   }
 }

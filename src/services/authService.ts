@@ -10,7 +10,10 @@ import type {
 } from '../validations/authValidation'
 import { emailService } from './emailService'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret'
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is not defined')
+}
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '8h') as SignOptions['expiresIn']
 
 const hashToken = (token: string): string => {
@@ -19,8 +22,11 @@ const hashToken = (token: string): string => {
 
 export const authService = {
   async login(data: LoginInput) {
-    const user = await prisma.user.findUnique({
-      where: { email: data.email },
+    const user = await prisma.user.findFirst({
+      where: {
+        email: data.email,
+        deletedAt: null,
+      },
       include: {
         roles: {
           include: { role: true },
@@ -33,10 +39,7 @@ export const authService = {
     }
 
     if (!user.isActive) {
-      throw new AppError(
-        'Your account has been deactivated. Please contact an administrator.',
-        HttpStatus.FORBIDDEN
-      )
+      throw new AppError(Messages.ACCOUNT_DEACTIVATED, HttpStatus.FORBIDDEN)
     }
 
     const isPasswordValid = await bcrypt.compare(data.password, user.password)
@@ -98,8 +101,11 @@ export const authService = {
    * Used by the "Forgot Password" flow on the login page.
    */
   async forgotPassword(data: ForgotPasswordInput) {
-    const user = await prisma.user.findUnique({
-      where: { email: data.email },
+    const user = await prisma.user.findFirst({
+      where: {
+        email: data.email,
+        deletedAt: null,
+      },
     })
 
     if (!user) {
@@ -153,19 +159,52 @@ export const authService = {
 
     // 2. Perform update and blacklist in a transaction
     await prisma.$transaction(async tx => {
+      const tokenHash = hashToken(data.token)
+      const expiresAt = new Date(decoded.exp * 1000)
+
+      // 1. Atomic blacklist gate: creation will fail if token already used
+      try {
+        await tx.blacklistedToken.create({
+          data: {
+            tokenHash,
+            expiresAt,
+          },
+        })
+      } catch (error: any) {
+        // P2002 is Prisma's unique constraint violation code
+        if (error.code === 'P2002') {
+          throw new AppError(Messages.INVALID_RESET_TOKEN, HttpStatus.BAD_REQUEST)
+        }
+        throw error
+      }
+
+      // 2. Update user password
       await tx.user.update({
         where: { id: decoded.userId },
         data: { password: hashedPassword },
       })
-
-      const tokenHash = hashToken(data.token)
-      const expiresAt = new Date(decoded.exp * 1000)
-
-      await tx.blacklistedToken.upsert({
-        where: { tokenHash },
-        update: { expiresAt },
-        create: { tokenHash, expiresAt },
-      })
     })
+  },
+
+  async ensureUserIsActive(userId: number) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      select: {
+        isActive: true,
+        roles: {
+          include: { role: true },
+        },
+      },
+    })
+
+    if (!user) {
+      throw new AppError(Messages.USER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    if (!user.isActive) {
+      throw new AppError(Messages.ACCOUNT_DEACTIVATED, HttpStatus.FORBIDDEN)
+    }
+
+    return user.roles[0]?.role.name || null
   },
 }

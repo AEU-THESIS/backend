@@ -4,7 +4,6 @@ import { AppError } from '../utils/appError'
 import { HttpStatus } from '../constants/httpStatus'
 import { Messages } from '../constants/messages'
 import { authService } from '../services/authService'
-import { prisma } from '../core/Service'
 
 export type AuthUser = {
   user_id: number
@@ -39,10 +38,7 @@ const getBearerToken = (authorizationHeader?: string) => {
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = getBearerToken(req.headers.authorization)
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'fallback-secret'
-    ) as AuthTokenPayload
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as AuthTokenPayload
 
     // Check if the token has been blacklisted (logout invalidation)
     const isBlacklisted = await authService.isTokenBlacklisted(token)
@@ -55,20 +51,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     }
 
     // Ensure the user still exists and is active
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.user_id },
-      select: { isActive: true },
-    })
-
-    if (!user || !user.isActive) {
-      throw new AppError('Your account has been deactivated.', HttpStatus.UNAUTHORIZED)
-    }
+    const role = await authService.ensureUserIsActive(decoded.user_id)
 
     req.user = {
       user_id: decoded.user_id,
       email: decoded.email,
       shop_id: decoded.shop_id,
-      role: decoded.role || null,
+      role,
     }
     next()
   } catch (error) {

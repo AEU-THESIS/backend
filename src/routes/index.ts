@@ -12,6 +12,6 @@ router.use('/auth', authRoutes)
 router.use('/shops', shopRoutes)
 router.use('/users', userRoutes)
 router.use('/roles', roleRoutes)
-router.use('/upload', uploadRoutes)
+router.use('/uploads', uploadRoutes)
 
 export default router

@@ -6,7 +6,10 @@ import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret'
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is not defined')
+}
 
 export const userService = {
   /**
@@ -88,8 +91,11 @@ export const userService = {
    * - Sends an account setup email with an 8-hour token
    */
   async createStaff(data: CreateStaffInput, shopId: number) {
-    const existingUser = await prisma.user.findUnique({
-      where: { email: data.email },
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        email: data.email,
+        deletedAt: null,
+      },
     })
 
     if (existingUser) {
@@ -126,22 +132,38 @@ export const userService = {
         },
       })
 
+      const inviteToken = jwt.sign(
+        { userId: newUser.id, email: newUser.email, type: 'password_reset' },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+      )
+      const inviteExpires = new Date(Date.now() + 8 * 60 * 60 * 1000)
+
+      const updatedUser = await tx.user.update({
+        where: { id: newUser.id },
+        data: {
+          inviteToken,
+          inviteExpires,
+        },
+      })
+
       await tx.roleUser.create({
         data: {
-          userId: newUser.id,
+          userId: updatedUser.id,
           roleId: data.roleId,
         },
       })
 
-      return newUser
+      return updatedUser
     })
 
-    // Generate 8-hour single-use setup token
-    const resetToken = jwt.sign({ userId: user.id, type: 'password_reset' }, JWT_SECRET, {
-      expiresIn: '8h',
-    })
-
-    await emailService.sendAccountSetupEmail(user.email, user.name, resetToken)
+    try {
+      await emailService.sendAccountSetupEmail(user.email, user.name, user.inviteToken!)
+    } catch (error) {
+      console.error('Failed to send account setup email:', error)
+      // We don't throw here to ensure the user creation is considered successful
+      // Resend logic can be triggered later since we persisted the token
+    }
 
     return {
       id: user.id,
@@ -168,8 +190,11 @@ export const userService = {
     }
 
     if (data.email && data.email !== user.email) {
-      const existingUser = await prisma.user.findUnique({
-        where: { email: data.email },
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: data.email,
+          deletedAt: null,
+        },
       })
       if (existingUser) {
         throw new AppError(Messages.USER_ALREADY_EXISTS, HttpStatus.BAD_REQUEST)
@@ -191,16 +216,25 @@ export const userService = {
         console.log('[UserService] Detecting image change/removal.')
         console.log(`[UserService] Old Image: ${user.imageUrl} | New Image: ${data.imageUrl}`)
 
-        const oldFileName = user.imageUrl.replace('/uploads/', '')
-        const oldFilePath = path.join(__dirname, '../../public/uploads', oldFileName)
+        const uploadsDir = path.resolve(__dirname, '../../public/uploads')
+        const oldFileName = path.basename(user.imageUrl)
+        const oldFilePath = path.join(uploadsDir, oldFileName)
 
         console.log(`[UserService] Attempting to delete: ${oldFilePath}`)
 
-        if (fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath)
-          console.log('[UserService] Successfully deleted old image from file system.')
+        // Security check: ensure the resolved path is inside the uploads directory
+        // and we only delete if the original URL actually pointed to our uploads
+        if (user.imageUrl.startsWith('/uploads/') && oldFilePath.startsWith(uploadsDir)) {
+          if (fs.existsSync(oldFilePath)) {
+            fs.unlinkSync(oldFilePath)
+            console.log('[UserService] Successfully deleted old image from file system.')
+          } else {
+            console.log('[UserService] File does not exist, nothing to delete.')
+          }
         } else {
-          console.log('[UserService] File does not exist, nothing to delete.')
+          console.log(
+            '[UserService] Skipping deletion: path is outside uploads directory or external.'
+          )
         }
       } catch (err) {
         console.error('[UserService] Failed to delete old image:', err)
@@ -214,6 +248,15 @@ export const userService = {
       })
 
       if (data.roleId) {
+        // Verify the role belongs to the same shop
+        const role = await tx.role.findFirst({
+          where: { id: data.roleId, shopId: user.shopId },
+        })
+
+        if (!role) {
+          throw new AppError(Messages.ROLE_NOT_FOUND, HttpStatus.BAD_REQUEST)
+        }
+
         // Update role if changed
         await tx.roleUser.deleteMany({ where: { userId: id } })
         await tx.roleUser.create({
@@ -240,9 +283,8 @@ export const userService = {
     return await prisma.user.update({
       where: { id },
       data: {
-        email: `${user.email}_deleted_${Date.now()}`,
-        deletedAt: new Date(),
         isActive: false,
+        deletedAt: new Date(),
       },
     })
   },

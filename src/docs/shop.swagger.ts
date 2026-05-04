@@ -11,7 +11,7 @@
  *     summary: Get all shops
  *     description: Retrieve a list of all configured shops
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Successfully retrieved shops
@@ -21,7 +21,7 @@
  *     summary: Create a new shop (Admin Only)
  *     description: Create a new shop configuration instance
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:

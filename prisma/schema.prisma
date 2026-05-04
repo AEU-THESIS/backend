@@ -2,8 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -48,7 +47,7 @@ model User {
   id           Int      @id @default(autoincrement())
   shopId       Int      @map("shop_id")
   name         String
-  email        String   @unique
+  email        String
   password     String
   pinCode      String?  @map("pin_code")
   isPinEnabled Boolean  @default(false) @map("is_pin_enabled")
@@ -56,13 +55,18 @@ model User {
   address      String?  @db.Text
   imageUrl     String?  @map("image_url") @db.LongText
   isActive     Boolean  @default(true) @map("is_active")
-  employeeId   String?  @unique @map("employee_id")
+  employeeId   String?  @map("employee_id")
+  inviteToken  String?   @map("invite_token") @db.Text
+  inviteExpires DateTime? @map("invite_expires")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   deletedAt    DateTime? @map("deleted_at")
 
   shop             Shop            @relation(fields: [shopId], references: [id])
   roles            RoleUser[]
+
+  @@unique([email, deletedAt])
+  @@unique([employeeId, deletedAt])
   ingredientLogs   IngredientLog[]
   orders           Order[]
   personalTokens   PersonalAccessToken[]

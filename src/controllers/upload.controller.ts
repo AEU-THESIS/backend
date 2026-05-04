@@ -1,58 +1,23 @@
 import { Request, Response } from 'express'
 import { processImage, deleteImage } from '../utils/fileUpload'
+import { catchAsync, sendSuccess, AppError, HttpStatus } from '../core/Controller'
+import { removeImageSchema } from '../validations/uploadValidation'
 
-export const uploadImage = async (req: Request, res: Response) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No image file provided.',
-      })
-    }
-
-    // Process the image using sharp
-    const imageUrl = await processImage(req.file.buffer)
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        url: imageUrl,
-      },
-      message: 'Image uploaded successfully',
-    })
-  } catch (error: any) {
-    console.error('[Upload Error]', error)
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to upload image.',
-      error: error.message,
-    })
+export const uploadImage = catchAsync(async (req: Request, res: Response) => {
+  if (!req.file) {
+    throw new AppError('No image file provided.', HttpStatus.BAD_REQUEST)
   }
-}
 
-export const removeImage = async (req: Request, res: Response) => {
-  try {
-    const { imageUrl } = req.body
+  // Process the image using sharp
+  const imageUrl = await processImage(req.file.buffer)
 
-    if (!imageUrl) {
-      return res.status(400).json({
-        success: false,
-        message: 'No image URL provided.',
-      })
-    }
+  sendSuccess(res, { url: imageUrl }, 'Image uploaded successfully')
+})
 
-    deleteImage(imageUrl)
+export const removeImage = catchAsync(async (req: Request, res: Response) => {
+  const { imageUrl } = removeImageSchema.parse(req.body)
 
-    return res.status(200).json({
-      success: true,
-      message: 'Image deleted successfully',
-    })
-  } catch (error: any) {
-    console.error('[Delete Error]', error)
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to delete image.',
-      error: error.message,
-    })
-  }
-}
+  deleteImage(imageUrl)
+
+  sendSuccess(res, null, 'Image deleted successfully')
+})

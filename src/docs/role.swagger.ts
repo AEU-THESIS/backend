@@ -11,7 +11,7 @@
  *     summary: Get all roles for the authenticated user's shop
  *     description: Returns available roles (e.g. Admin, Manager, Cashier) for the shop. Used to populate the role dropdown in the staff creation form.
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Roles retrieved successfully

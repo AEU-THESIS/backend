@@ -1,4 +1,4 @@
-import { PrismaClient } from '../src/generated/prisma/client'
+import { PrismaClient } from '@prisma/client'
 import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import bcrypt from 'bcryptjs'
 import 'dotenv/config'
@@ -62,62 +62,70 @@ async function main() {
   })
 
   // 3. Create Admin User
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@routincafe.com' },
-    update: {},
-    create: {
-      name: 'Admin User',
-      email: 'admin@routincafe.com',
-      password: hashedPassword,
-      shopId: shop.id,
-      employeeId: '#SP-0001',
-    },
+  let admin = await prisma.user.findFirst({
+    where: { email: 'admin@routincafe.com', deletedAt: null },
   })
+  if (!admin) {
+    admin = await prisma.user.create({
+      data: {
+        name: 'Admin User',
+        email: 'admin@routincafe.com',
+        password: hashedPassword,
+        shopId: shop.id,
+        employeeId: '#SP-0001',
+      },
+    })
+  }
 
   // 4. Create Cashier User
-  const cashier = await prisma.user.upsert({
-    where: { email: 'cashier@routincafe.com' },
-    update: {},
-    create: {
-      name: 'Cashier User',
-      email: 'cashier@routincafe.com',
-      password: hashedPassword,
-      shopId: shop.id,
-      employeeId: '#SP-0002',
-    },
+  let cashier = await prisma.user.findFirst({
+    where: { email: 'cashier@routincafe.com', deletedAt: null },
   })
+  if (!cashier) {
+    cashier = await prisma.user.create({
+      data: {
+        name: 'Cashier User',
+        email: 'cashier@routincafe.com',
+        password: hashedPassword,
+        shopId: shop.id,
+        employeeId: '#SP-0002',
+      },
+    })
+  }
 
   // 5. Create Manager User
-  const manager = await prisma.user.upsert({
-    where: { email: 'manager@routincafe.com' },
-    update: {},
-    create: {
-      name: 'Manager User',
-      email: 'manager@routincafe.com',
-      password: hashedPassword,
-      shopId: shop.id,
-      employeeId: '#SP-0003',
-    },
+  let manager = await prisma.user.findFirst({
+    where: { email: 'manager@routincafe.com', deletedAt: null },
   })
+  if (!manager) {
+    manager = await prisma.user.create({
+      data: {
+        name: 'Manager User',
+        email: 'manager@routincafe.com',
+        password: hashedPassword,
+        shopId: shop.id,
+        employeeId: '#SP-0003',
+      },
+    })
+  }
 
-  // 5. Assign Roles
-  await prisma.roleUser.upsert({
-    where: { userId_roleId: { userId: admin.id, roleId: adminRole.id } },
-    update: {},
-    create: { userId: admin.id, roleId: adminRole.id },
-  })
+  // 6. Assign Roles
+  const rolesToAssign = [
+    { user: admin, roleId: adminRole.id },
+    { user: cashier, roleId: cashierRole.id },
+    { user: manager, roleId: managerRole.id },
+  ]
 
-  await prisma.roleUser.upsert({
-    where: { userId_roleId: { userId: cashier.id, roleId: cashierRole.id } },
-    update: {},
-    create: { userId: cashier.id, roleId: cashierRole.id },
-  })
-
-  await prisma.roleUser.upsert({
-    where: { userId_roleId: { userId: manager.id, roleId: managerRole.id } },
-    update: {},
-    create: { userId: manager.id, roleId: managerRole.id },
-  })
+  for (const { user, roleId } of rolesToAssign) {
+    const existingRoleUser = await prisma.roleUser.findUnique({
+      where: { userId_roleId: { userId: user.id, roleId } },
+    })
+    if (!existingRoleUser) {
+      await prisma.roleUser.create({
+        data: { userId: user.id, roleId },
+      })
+    }
+  }
 
   console.log('✅ Seed completed: Admin, Manager & Cashier created')
   console.log('   📧 admin@routincafe.com / password123')

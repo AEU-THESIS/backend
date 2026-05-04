@@ -26,18 +26,27 @@ jobs:
           echo "ticket_line=$TICKET_LINE" >> $GITHUB_OUTPUT
 
       - name: Send Telegram Message directly via API
+        env:
+          PR_TITLE: ${{ toJson(github.event.pull_request.title) }}
+          PR_MERGED_BY: ${{ toJson(github.event.pull_request.merged_by.login) }}
+          PR_URL: ${{ toJson(github.event.pull_request.html_url) }}
+          TICKET_LINE: ${{ toJson(steps.extract_jira.outputs.ticket_line) }}
         run: |
-          # Safely package the message into a JSON file
+          # Safely package the message into a JSON file using args
           jq -n \
             --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
             --arg topic_id "${{ secrets.TELEGRAM_TOPIC_ID }}" \
+            --argjson title "$PR_TITLE" \
+            --argjson merged_by "$PR_MERGED_BY" \
+            --argjson url "$PR_URL" \
+            --argjson ticket "$TICKET_LINE" \
             --arg text " <b>New Feature Merged to Dev (backend)!</b> 🚀
 
-          👨‍💻 <b>Merged By:</b> ${{ github.event.pull_request.merged_by.login }}
-          📌 <b>Task:</b> ${{ github.event.pull_request.title }}
-          ${{ steps.extract_jira.outputs.ticket_line }}
+          👨‍💻 <b>Merged By:</b> $merged_by
+          📌 <b>Task:</b> $title
+          $ticket
 
-          🔗 <a href=\"${{ github.event.pull_request.html_url }}\">View the Pull Request</a>
+          🔗 <a href=\"$url\">View the Pull Request</a>
 
           Everyone pull the latest code and check it out! 🔥" \
             '{
@@ -47,7 +56,25 @@ jobs:
               text: $text
             }' > payload.json
             
-          # Send it straight to Telegram!
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+          # Send it to Telegram and check for success
+          RESPONSE=$(curl -S -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d @payload.json
+            -d @payload.json \
+            -w "\n%{http_code}")
+
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n 1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "Response Body: $BODY"
+          echo "HTTP Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "Error: Telegram API returned HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+          IS_OK=$(echo "$BODY" | jq -r '.ok')
+          if [ "$IS_OK" != "true" ]; then
+            echo "Error: Telegram API returned ok: false"
+            exit 1
+          fi

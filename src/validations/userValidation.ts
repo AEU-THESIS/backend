@@ -25,3 +25,11 @@ export const updateStaffSchema = createStaffSchema.partial().extend({
 })
 
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>
+
+export const getStaffQuerySchema = z.object({
+  page: z.string().optional().default('1').transform(Number).pipe(z.number().positive()),
+  limit: z.string().optional().default('10').transform(Number).pipe(z.number().positive()),
+  search: z.string().optional(),
+})
+
+export type GetStaffQueryInput = z.infer<typeof getStaffQuerySchema>

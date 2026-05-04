@@ -27,7 +27,10 @@ export const authController = {
   }),
 
   resetPassword: catchAsync(async (req: Request, res: Response) => {
-    const body = resetPasswordSchema.parse(req.body)
+    const body = resetPasswordSchema.parse({
+      ...req.body,
+      token: req.params.token,
+    })
     await authService.resetPassword(body)
     return sendSuccess(res, null, Messages.PASSWORD_RESET_SUCCESS)
   }),

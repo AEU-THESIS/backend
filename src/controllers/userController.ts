@@ -6,20 +6,20 @@ import {
   HttpStatus,
   Messages,
 } from '../core/Controller'
-import { createStaffSchema, updateStaffSchema } from '../validations/userValidation'
+import {
+  createStaffSchema,
+  updateStaffSchema,
+  getStaffQuerySchema,
+} from '../validations/userValidation'
+import { idParamSchema } from '../validations/commonValidation'
 import { userService } from '../services/userService'
 
 export const userController = {
   getStaff: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const { page, limit, search } = req.query
+    const { page, limit, search } = getStaffQuerySchema.parse(req.query)
 
-    const result = await userService.getStaffByShop(
-      shopId,
-      page ? Number(page) : 1,
-      limit ? Number(limit) : 10,
-      search as string
-    )
+    const result = await userService.getStaffByShop(shopId, page, limit, search)
 
     return sendSuccess(res, result)
   }),
@@ -32,17 +32,17 @@ export const userController = {
   }),
 
   updateStaff: catchAsync(async (req: Request, res: Response) => {
-    const { id } = req.params
+    const { id } = idParamSchema.parse(req.params)
     const body = updateStaffSchema.parse(req.body)
     const shopId = req.user!.shop_id
-    const staff = await userService.updateStaff(Number(id), body, shopId)
+    const staff = await userService.updateStaff(id, body, shopId)
     return sendSuccess(res, staff, Messages.STAFF_UPDATED)
   }),
 
   deleteStaff: catchAsync(async (req: Request, res: Response) => {
-    const { id } = req.params
+    const { id } = idParamSchema.parse(req.params)
     const shopId = req.user!.shop_id
-    await userService.deleteStaff(Number(id), shopId)
+    await userService.deleteStaff(id, shopId)
     return sendSuccess(res, null, Messages.STAFF_DELETED)
   }),
 }
