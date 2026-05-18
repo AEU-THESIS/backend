@@ -23,4 +23,5 @@ export const Messages = {
   INVALID_RESET_TOKEN: 'Invalid or expired reset token',
   ACCOUNT_DEACTIVATED: 'Your account has been deactivated. Please contact an administrator.',
   INVALID_SHOP_SCOPE: 'Invalid shop scope provided',
+  INSUFFICIENT_STOCK: 'Insufficient stock for this adjustment',
 } as const

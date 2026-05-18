@@ -310,18 +310,23 @@ model InventoryItem {
 }
 
 model InventoryLog {
-  id              Int      @id @default(autoincrement())
-  inventoryItemId Int      @map("inventory_item_id")
-  userId          Int      @map("user_id")
-  adjustmentType  String   @map("adjustment_type")
-  quantityChanged Decimal  @map("quantity_changed") @db.Decimal(10, 2)
-  notes           String?  @db.Text
-  createdAt       DateTime @default(now()) @map("created_at")
+  id              Int            @id @default(autoincrement())
+  inventoryItemId Int            @map("inventory_item_id")
+  userId          Int            @map("user_id")
+  adjustmentType  AdjustmentType @map("adjustment_type")
+  quantityChanged Decimal        @map("quantity_changed") @db.Decimal(10, 2)
+  notes           String?        @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at")
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
   user          User          @relation(fields: [userId], references: [id])
 
   @@map("inventory_logs")
+}
+
+enum AdjustmentType {
+  add
+  remove
 }
 
 // ==========================================

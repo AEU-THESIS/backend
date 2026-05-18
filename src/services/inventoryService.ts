@@ -140,7 +140,6 @@ export const inventoryService = {
       }
 
       const changeAmount = data.change_amount
-      const quantityChanged = data.adjustment_type === 'remove' ? -changeAmount : changeAmount
 
       if (data.adjustment_type === 'remove') {
         const result = await tx.inventoryItem.updateMany({
@@ -156,7 +155,7 @@ export const inventoryService = {
         })
 
         if (result.count !== 1) {
-          throw new AppError('Insufficient stock for this adjustment', HttpStatus.BAD_REQUEST)
+          throw new AppError(Messages.INSUFFICIENT_STOCK, HttpStatus.BAD_REQUEST)
         }
       } else {
         await tx.inventoryItem.update({
@@ -172,7 +171,7 @@ export const inventoryService = {
           inventoryItemId: id,
           userId,
           adjustmentType: data.adjustment_type,
-          quantityChanged,
+          quantityChanged: changeAmount,
           notes: data.notes || null,
         },
       })

@@ -8,7 +8,7 @@ const decimalInput = z
 const nonNegativeDecimal = decimalInput.refine(value => value >= 0, 'Quantity cannot be negative')
 const positiveDecimal = decimalInput.refine(value => value > 0, 'Quantity must be greater than 0')
 
-export const createInventoryItemSchema = z.object({
+const inventoryItemBaseSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   sku: z.string().trim().optional().nullable(),
   unitOfMeasure: z.string().trim().min(1, 'Unit of measure is required').optional(),
@@ -18,8 +18,43 @@ export const createInventoryItemSchema = z.object({
   min_alert_threshold: nonNegativeDecimal.optional(),
 })
 
-export const updateInventoryItemSchema = createInventoryItemSchema
+type InventoryItemAliasInput = Partial<z.infer<typeof inventoryItemBaseSchema>>
+
+const validateAliasPairs = (data: InventoryItemAliasInput, ctx: z.RefinementCtx) => {
+  if (
+    data.unitOfMeasure !== undefined &&
+    data.unit_of_measure !== undefined &&
+    data.unitOfMeasure !== data.unit_of_measure
+  ) {
+    ;(['unitOfMeasure', 'unit_of_measure'] as const).forEach(path => {
+      ctx.addIssue({
+        code: 'custom',
+        path: [path],
+        message: 'unitOfMeasure and unit_of_measure must match when both are provided',
+      })
+    })
+  }
+
+  if (
+    data.minAlertThreshold !== undefined &&
+    data.min_alert_threshold !== undefined &&
+    data.minAlertThreshold !== data.min_alert_threshold
+  ) {
+    ;(['minAlertThreshold', 'min_alert_threshold'] as const).forEach(path => {
+      ctx.addIssue({
+        code: 'custom',
+        path: [path],
+        message: 'minAlertThreshold and min_alert_threshold must match when both are provided',
+      })
+    })
+  }
+}
+
+export const createInventoryItemSchema = inventoryItemBaseSchema.superRefine(validateAliasPairs)
+
+export const updateInventoryItemSchema = inventoryItemBaseSchema
   .partial()
+  .superRefine(validateAliasPairs)
   .refine(data => Object.keys(data).length > 0, 'At least one inventory field is required')
 
 export const adjustInventoryItemSchema = z.object({

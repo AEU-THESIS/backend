@@ -14,6 +14,6 @@ router.get('/', inventoryController.getAll)
 router.post('/', upload.single('image'), inventoryController.create)
 router.put('/:id', upload.single('image'), inventoryController.update)
 router.delete('/:id', inventoryController.delete)
-router.post('/:id/adjust', inventoryController.adjust)
+router.post('/:id/adjustments', inventoryController.adjust)
 
 export default router
