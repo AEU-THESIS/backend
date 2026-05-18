@@ -15,7 +15,7 @@ datasource db {
 model Shop {
   id               Int      @id @default(autoincrement())
   name             String
-  slug             String
+  slug             String   @unique
   ownerName        String?  @map("owner_name")
   phone            String?
   address          String?  @db.Text

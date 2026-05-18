@@ -11,6 +11,7 @@ export const Messages = {
   EMAIL_SEND_FAILED: 'Failed to send email',
   // Modules
   SHOP_NOT_FOUND: 'Shop not found',
+  SHOP_SLUG_EXISTS: 'Shop slug already exists',
   USER_NOT_FOUND: 'User not found',
   USER_ALREADY_EXISTS: 'User with this email already exists',
   STAFF_CREATED: 'Staff member created successfully. Setup email sent.',

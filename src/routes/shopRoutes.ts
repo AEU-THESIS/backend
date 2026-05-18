@@ -1,15 +1,18 @@
-import { Router } from "express";
-import { shopController } from "../controllers/shopController";
-import { authenticate } from "../middlewares/authMiddleware";
-import { requireRoles } from "../middlewares/roleMiddleware";
+import { Router } from 'express'
+import { shopController } from '../controllers/shopController'
+import { authenticate } from '../middlewares/authMiddleware'
+import { requireRoles } from '../middlewares/roleMiddleware'
 
-const router = Router();
+const router = Router()
 
 // Protect shop routes securely
-router.use(authenticate);
+router.use(authenticate)
+
+router.get('/settings', requireRoles(['Admin']), shopController.getSettings)
+router.put('/settings', requireRoles(['Admin']), shopController.updateSettings)
 
 // Only Admins can create shops
-router.post("/", requireRoles(["Admin"]), shopController.create);
-router.get("/", shopController.getAll);
+router.post('/', requireRoles(['Admin']), shopController.create)
+router.get('/', shopController.getAll)
 
-export default router;
+export default router
