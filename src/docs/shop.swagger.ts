@@ -49,7 +49,7 @@
  *     summary: Get authenticated shop settings (Admin Only)
  *     description: Fetch the shop configuration associated with the authenticated user's JWT.
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Successfully retrieved shop settings
@@ -65,7 +65,7 @@
  *     summary: Update authenticated shop settings (Admin Only)
  *     description: Partially update allowed shop configuration fields without overwriting omitted data.
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
