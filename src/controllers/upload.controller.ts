@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { processImage, deleteImage } from '../utils/fileUpload'
-import { catchAsync, sendSuccess, AppError, HttpStatus } from '../core/Controller'
+import { catchAsync, sendSuccess, HttpStatus } from '../core/Controller'
+import { AppError } from '../utils/appError'
 import { removeImageSchema } from '../validations/uploadValidation'
 
 export const uploadImage = catchAsync(async (req: Request, res: Response) => {
