@@ -236,7 +236,7 @@
  *                             type: string
  *                             example: "g"
  *
- * /api/reports/export:
+ * /api/reports/exports:
  *   get:
  *     tags:
  *       - Reports

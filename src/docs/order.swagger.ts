@@ -9,7 +9,7 @@
  *     tags:
  *       - Order
  *     summary: Place a new POS checkout order
- *     description: Creates an order, recaculate and validates pricing server-side, processes dual-currency payment (USD/KHR), calculates change, and atomically deducts ingredient stocks in a transactional block.
+ *     description: Creates an order, recalculates and validates pricing server-side, processes dual-currency payment (USD/KHR), calculates change, and stores order details in a transactional block.
  *     security:
  *       - bearerAuth: []
  *     requestBody:

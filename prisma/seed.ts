@@ -22,11 +22,17 @@ let passwordSource = 'process.env.SEED_ADMIN_PASSWORD'
 async function main() {
   // Determine secure password source
   let seedPassword = process.env.SEED_ADMIN_PASSWORD
+  const seedPasswordPath = path.join(__dirname, '../.seed-password')
 
   if (!seedPassword) {
-    seedPassword = crypto.randomBytes(16).toString('hex')
-    passwordSource = 'generated and saved to backend/.seed-password'
-    fs.writeFileSync(path.join(__dirname, '../.seed-password'), seedPassword, 'utf8')
+    if (fs.existsSync(seedPasswordPath)) {
+      seedPassword = fs.readFileSync(seedPasswordPath, 'utf8').trim()
+      passwordSource = 'loaded from backend/.seed-password'
+    } else {
+      seedPassword = crypto.randomBytes(16).toString('hex')
+      passwordSource = 'generated and saved to backend/.seed-password'
+      fs.writeFileSync(seedPasswordPath, seedPassword, { encoding: 'utf8', mode: 0o600 })
+    }
   }
 
   const hashedPassword = await bcrypt.hash(seedPassword, 10)
@@ -164,58 +170,73 @@ async function main() {
   // ==========================================
   // 5. OPTION SETS (Size, Sugar, Ice)
   // ==========================================
+  const sizeElements = [
+    { label: 'Small', priceModifier: 0.0, position: 0 },
+    { label: 'Medium', priceModifier: 0.5, position: 1 },
+    { label: 'Large', priceModifier: 1.0, position: 2 },
+  ]
   let sizeSet = await prisma.optionSet.findFirst({ where: { shopId: shop.id, name: 'Size' } })
   if (!sizeSet) {
     sizeSet = await prisma.optionSet.create({
-      data: {
-        shopId: shop.id,
-        name: 'Size',
-        elements: {
-          create: [
-            { label: 'Small', priceModifier: 0.0, position: 0 },
-            { label: 'Medium', priceModifier: 0.5, position: 1 },
-            { label: 'Large', priceModifier: 1.0, position: 2 },
-          ],
-        },
-      },
+      data: { shopId: shop.id, name: 'Size' },
     })
   }
+  for (const el of sizeElements) {
+    const existing = await prisma.optionSetElement.findFirst({
+      where: { optionSetId: sizeSet.id, label: el.label },
+    })
+    if (!existing) {
+      await prisma.optionSetElement.create({
+        data: { optionSetId: sizeSet.id, ...el },
+      })
+    }
+  }
 
+  const sugarElements = [
+    { label: 'No Sugar', priceModifier: 0.0, position: 0 },
+    { label: '25%', priceModifier: 0.0, position: 1 },
+    { label: '50% (Standard)', priceModifier: 0.0, position: 2 },
+    { label: '100%', priceModifier: 0.0, position: 3 },
+  ]
   let sugarSet = await prisma.optionSet.findFirst({
     where: { shopId: shop.id, name: 'Sugar Level' },
   })
   if (!sugarSet) {
     sugarSet = await prisma.optionSet.create({
-      data: {
-        shopId: shop.id,
-        name: 'Sugar Level',
-        elements: {
-          create: [
-            { label: 'No Sugar', priceModifier: 0.0, position: 0 },
-            { label: '25%', priceModifier: 0.0, position: 1 },
-            { label: '50% (Standard)', priceModifier: 0.0, position: 2 },
-            { label: '100%', priceModifier: 0.0, position: 3 },
-          ],
-        },
-      },
+      data: { shopId: shop.id, name: 'Sugar Level' },
     })
   }
+  for (const el of sugarElements) {
+    const existing = await prisma.optionSetElement.findFirst({
+      where: { optionSetId: sugarSet.id, label: el.label },
+    })
+    if (!existing) {
+      await prisma.optionSetElement.create({
+        data: { optionSetId: sugarSet.id, ...el },
+      })
+    }
+  }
 
+  const iceElements = [
+    { label: 'No Ice', priceModifier: 0.0, position: 0 },
+    { label: 'Less Ice', priceModifier: 0.0, position: 1 },
+    { label: 'Standard Ice', priceModifier: 0.0, position: 2 },
+  ]
   let iceSet = await prisma.optionSet.findFirst({ where: { shopId: shop.id, name: 'Ice Level' } })
   if (!iceSet) {
     iceSet = await prisma.optionSet.create({
-      data: {
-        shopId: shop.id,
-        name: 'Ice Level',
-        elements: {
-          create: [
-            { label: 'No Ice', priceModifier: 0.0, position: 0 },
-            { label: 'Less Ice', priceModifier: 0.0, position: 1 },
-            { label: 'Standard Ice', priceModifier: 0.0, position: 2 },
-          ],
-        },
-      },
+      data: { shopId: shop.id, name: 'Ice Level' },
     })
+  }
+  for (const el of iceElements) {
+    const existing = await prisma.optionSetElement.findFirst({
+      where: { optionSetId: iceSet.id, label: el.label },
+    })
+    if (!existing) {
+      await prisma.optionSetElement.create({
+        data: { optionSetId: iceSet.id, ...el },
+      })
+    }
   }
 
   // ==========================================
@@ -336,6 +357,7 @@ async function main() {
   const products: Record<string, { id: number; price: number }> = {}
   for (const pd of productData) {
     const existing = await prisma.product.findFirst({ where: { shopId: shop.id, name: pd.name } })
+    let productId: number
     if (existing) {
       // Mock/Update existing product image URLs for testing
       await prisma.product.update({
@@ -343,6 +365,7 @@ async function main() {
         data: { imageUrl: pd.imageUrl },
       })
       products[pd.name] = { id: existing.id, price: Number(existing.price) }
+      productId = existing.id
     } else {
       const created = await prisma.product.create({
         data: {
@@ -355,12 +378,18 @@ async function main() {
         },
       })
       products[pd.name] = { id: created.id, price: Number(created.price) }
+      productId = created.id
+    }
 
-      // Link modifiers to drinks (Size + Sugar + Ice)
-      if (pd.hasModifiers) {
-        for (const optionSetId of [sizeSet.id, sugarSet.id, iceSet.id]) {
+    // Link modifiers to drinks (Size + Sugar + Ice)
+    if (pd.hasModifiers) {
+      for (const optionSetId of [sizeSet.id, sugarSet.id, iceSet.id]) {
+        const existingRelation = await prisma.productOptionSet.findFirst({
+          where: { productId, optionSetId },
+        })
+        if (!existingRelation) {
           await prisma.productOptionSet.create({
-            data: { productId: created.id, optionSetId, isRequired: false },
+            data: { productId, optionSetId, isRequired: false },
           })
         }
       }

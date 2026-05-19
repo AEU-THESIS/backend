@@ -13,8 +13,7 @@ import { AppError } from '../utils/appError'
 export const reportController = {
   getOverview: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const parsed = ReportPeriodSchema.safeParse(req.query)
-    const period = parsed.success ? parsed.data.period : 'daily'
+    const { period } = ReportPeriodSchema.parse(req.query)
 
     const overview = await reportService.getSalesOverview(shopId, period)
     return sendSuccess(res, overview)
@@ -22,8 +21,7 @@ export const reportController = {
 
   getItemPerformance: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const parsed = ReportPeriodSchema.safeParse(req.query)
-    const period = parsed.success ? parsed.data.period : 'daily'
+    const { period } = ReportPeriodSchema.parse(req.query)
 
     const performance = await reportService.getItemPerformance(shopId, period)
     return sendSuccess(res, performance)
@@ -31,8 +29,7 @@ export const reportController = {
 
   getCategoryPerformance: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const parsed = ReportPeriodSchema.safeParse(req.query)
-    const period = parsed.success ? parsed.data.period : 'daily'
+    const { period } = ReportPeriodSchema.parse(req.query)
 
     const performance = await reportService.getCategoryPerformance(shopId, period)
     return sendSuccess(res, performance)
@@ -46,10 +43,7 @@ export const reportController = {
 
   exportCSV: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const type = req.query.type === 'inventory' ? 'inventory' : 'sales'
-
-    const parsed = ReportPeriodSchema.safeParse(req.query)
-    const period = parsed.success ? parsed.data.period : 'daily'
+    const { type, period } = ReportPeriodSchema.parse(req.query)
 
     const csvContent = await reportService.getCSVExportData(shopId, type, period)
 

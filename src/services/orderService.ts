@@ -14,23 +14,114 @@ export const orderService = {
 
     // ── 1. Validate all products belong to this shop ──────────────────
     const productIds = items.map(i => i.productId)
+    const uniqueProductIds = Array.from(new Set(productIds))
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, shopId, isAvailable: true },
+      where: { id: { in: uniqueProductIds }, shopId, isAvailable: true },
     })
 
-    if (products.length !== productIds.length) {
+    if (products.length !== uniqueProductIds.length) {
       throw new AppError(Messages.PRODUCT_NOT_FOUND, HttpStatus.BAD_REQUEST)
     }
 
     const productMap = new Map(products.map(p => [p.id, p]))
 
-    // ── 2. Server-side price recalculation ────────────────────────────
+    // Fetch secure option sets and elements assigned to these products
+    const productOptionSets = await prisma.productOptionSet.findMany({
+      where: { productId: { in: uniqueProductIds } },
+      include: {
+        optionSet: {
+          include: {
+            elements: true,
+          },
+        },
+      },
+    })
+
+    // Build secure lookup cache: productId -> OptionSetId -> OptionSetInfo
+    const productOptionsCache = new Map<
+      number,
+      Map<
+        number,
+        { groupName: string; elementsMap: Map<number, { optionName: string; extraPrice: number }> }
+      >
+    >()
+
+    for (const pos of productOptionSets) {
+      if (!productOptionsCache.has(pos.productId)) {
+        productOptionsCache.set(pos.productId, new Map())
+      }
+      const optionSetsMap = productOptionsCache.get(pos.productId)!
+
+      const elementsMap = new Map<number, { optionName: string; extraPrice: number }>()
+      for (const elem of pos.optionSet.elements) {
+        elementsMap.set(elem.id, {
+          optionName: elem.label,
+          extraPrice: Number(elem.priceModifier),
+        })
+      }
+
+      optionSetsMap.set(pos.optionSetId, {
+        groupName: pos.optionSet.name,
+        elementsMap,
+      })
+    }
+
+    // ── 2. Server-side price recalculation & Validation ────────────────
     let serverTotal = 0
+    const validatedItemsList: Array<{
+      productId: number
+      quantity: number
+      basePrice: number
+      optionsExtra: number
+      subtotal: number
+      validatedOptions: Array<{
+        groupName: string
+        optionName: string
+        extraPrice: number
+      }>
+    }> = []
+
     for (const item of items) {
       const product = productMap.get(item.productId)!
       const basePrice = Number(product.price)
-      const optionsExtra = item.selectedOptions.reduce((sum, o) => sum + o.extraPrice, 0)
-      serverTotal += (basePrice + optionsExtra) * item.quantity
+
+      let optionsExtra = 0
+      const validatedOptions = []
+
+      const optionSetsMap = productOptionsCache.get(item.productId)
+
+      for (const option of item.selectedOptions) {
+        const optionSet = optionSetsMap?.get(option.optionSetId)
+        if (!optionSet) {
+          throw new AppError(Messages.ORDER_VALIDATION_FAILED, HttpStatus.BAD_REQUEST)
+        }
+
+        const optionElement = optionSet.elementsMap.get(option.elementId)
+        if (!optionElement) {
+          throw new AppError(Messages.ORDER_VALIDATION_FAILED, HttpStatus.BAD_REQUEST)
+        }
+
+        const dbExtraPrice = optionElement.extraPrice
+        optionsExtra += dbExtraPrice
+
+        validatedOptions.push({
+          groupName: optionSet.groupName,
+          optionName: optionElement.optionName,
+          extraPrice: dbExtraPrice,
+        })
+      }
+
+      const subtotal = (basePrice + optionsExtra) * item.quantity
+      serverTotal += subtotal
+
+      validatedItemsList.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        basePrice,
+        optionsExtra,
+        subtotal,
+        validatedOptions,
+      })
     }
     serverTotal = Math.round(serverTotal * 100) / 100
 
@@ -68,26 +159,21 @@ export const orderService = {
         },
       })
 
-      // Create OrderItems + OrderItemOptions
-      for (const item of items) {
-        const product = productMap.get(item.productId)!
-        const basePrice = Number(product.price)
-        const optionsExtra = item.selectedOptions.reduce((sum, o) => sum + o.extraPrice, 0)
-        const subtotal = (basePrice + optionsExtra) * item.quantity
-
+      // Create OrderItems + OrderItemOptions using fully validated server-canonical data
+      for (const valItem of validatedItemsList) {
         const createdItem = await tx.orderItem.create({
           data: {
             orderId: createdOrder.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            price: basePrice,
-            extraPrice: optionsExtra,
-            subtotal,
+            productId: valItem.productId,
+            quantity: valItem.quantity,
+            price: valItem.basePrice,
+            extraPrice: valItem.optionsExtra,
+            subtotal: valItem.subtotal,
           },
         })
 
-        // Create selected option records
-        for (const option of item.selectedOptions) {
+        // Create selected option records using canonical data
+        for (const option of valItem.validatedOptions) {
           await tx.orderItemOption.create({
             data: {
               orderItemId: createdItem.id,

@@ -14,32 +14,43 @@ export const reportService = {
       select: {
         totalAmount: true,
         paymentCurrency: true,
+        exchangeRateSnapshot: true,
       },
     })
 
     const totalOrders = orders.length
-    let totalSales = 0
+    let totalSales = 0 // Unified base in USD
     let salesUSD = 0
     let salesKHR = 0
+    let countUSD = 0
+    let countKHR = 0
 
     orders.forEach(o => {
-      const amt = Number(o.totalAmount)
-      totalSales += amt
+      const amtUSD = Number(o.totalAmount)
+      totalSales += amtUSD
+
       if (o.paymentCurrency === 'USD') {
-        salesUSD += amt
+        salesUSD += amtUSD
+        countUSD++
       } else {
-        salesKHR += amt
+        const amtKHR = amtUSD * Number(o.exchangeRateSnapshot)
+        salesKHR += amtKHR
+        countKHR++
       }
     })
 
     const averageOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0
+    const averageOrderValueUSD = countUSD > 0 ? salesUSD / countUSD : 0
+    const averageOrderValueKHR = countKHR > 0 ? salesKHR / countKHR : 0
 
     return {
-      totalSales,
+      totalSales: Math.round(totalSales * 100) / 100,
       totalOrders,
-      averageOrderValue,
-      salesUSD,
-      salesKHR,
+      averageOrderValue: Math.round(averageOrderValue * 100) / 100,
+      salesUSD: Math.round(salesUSD * 100) / 100,
+      salesKHR: Math.round(salesKHR * 100) / 100,
+      averageOrderValueUSD: Math.round(averageOrderValueUSD * 100) / 100,
+      averageOrderValueKHR: Math.round(averageOrderValueKHR * 100) / 100,
     }
   },
 
@@ -191,6 +202,7 @@ export const reportService = {
         where: {
           shopId,
           createdAt: { gte: startDate },
+          paymentStatus: 'paid',
         },
         include: {
           user: { select: { name: true } },
@@ -204,7 +216,7 @@ export const reportService = {
         'Date',
         'Cashier',
         'Type',
-        'Total (USD)',
+        'Total Amount',
         'Currency',
         'Amount Received',
         'Payment Status',

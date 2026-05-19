@@ -14,6 +14,6 @@ router.get('/sales-overview', reportController.getOverview)
 router.get('/item-performance', reportController.getItemPerformance)
 router.get('/category-performance', reportController.getCategoryPerformance)
 router.get('/inventory-insights', reportController.getInventoryInsights)
-router.get('/export', reportController.exportCSV)
+router.get('/exports', reportController.exportCSV)
 
 export default router

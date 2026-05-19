@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const SelectedOptionSchema = z.object({
+const SelectedOptionSchema = z.strictObject({
   optionSetId: z.number().int().positive(),
   elementId: z.number().int().positive(),
   groupName: z.string().min(1),
@@ -8,13 +8,13 @@ const SelectedOptionSchema = z.object({
   extraPrice: z.number().min(0),
 })
 
-const OrderItemSchema = z.object({
+const OrderItemSchema = z.strictObject({
   productId: z.number().int().positive(),
   quantity: z.number().int().min(1).max(99),
   selectedOptions: z.array(SelectedOptionSchema).default([]),
 })
 
-export const CreateOrderSchema = z.object({
+export const CreateOrderSchema = z.strictObject({
   orderType: z.enum(['dine_in', 'takeaway']),
   paymentMethod: z.literal('cash'),
   paymentCurrency: z.enum(['USD', 'KHR']),
