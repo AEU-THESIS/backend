@@ -2,6 +2,9 @@ import { PrismaClient } from '@prisma/client'
 import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import bcrypt from 'bcryptjs'
 import 'dotenv/config'
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
 import { ROLES } from '../src/constants/roles'
 
 const adapter = new PrismaMariaDb({
@@ -14,8 +17,19 @@ const adapter = new PrismaMariaDb({
 
 const prisma = new PrismaClient({ adapter })
 
+let passwordSource = 'process.env.SEED_ADMIN_PASSWORD'
+
 async function main() {
-  const hashedPassword = await bcrypt.hash('password123', 10)
+  // Determine secure password source
+  let seedPassword = process.env.SEED_ADMIN_PASSWORD
+
+  if (!seedPassword) {
+    seedPassword = crypto.randomBytes(16).toString('hex')
+    passwordSource = 'generated and saved to backend/.seed-password'
+    fs.writeFileSync(path.join(__dirname, '../.seed-password'), seedPassword, 'utf8')
+  }
+
+  const hashedPassword = await bcrypt.hash(seedPassword, 10)
 
   // ==========================================
   // 1. SHOP
@@ -38,23 +52,32 @@ async function main() {
   // ==========================================
   // 2. ROLES
   // ==========================================
-  const adminRole = await prisma.role.upsert({
-    where: { id: 1 },
-    update: { name: ROLES.ADMIN },
-    create: { id: 1, name: ROLES.ADMIN, shopId: shop.id },
+  let adminRole = await prisma.role.findFirst({
+    where: { name: ROLES.ADMIN, shopId: shop.id },
   })
+  if (!adminRole) {
+    adminRole = await prisma.role.create({
+      data: { name: ROLES.ADMIN, shopId: shop.id },
+    })
+  }
 
-  const managerRole = await prisma.role.upsert({
-    where: { id: 2 },
-    update: { name: ROLES.MANAGER },
-    create: { id: 2, name: ROLES.MANAGER, shopId: shop.id },
+  let managerRole = await prisma.role.findFirst({
+    where: { name: ROLES.MANAGER, shopId: shop.id },
   })
+  if (!managerRole) {
+    managerRole = await prisma.role.create({
+      data: { name: ROLES.MANAGER, shopId: shop.id },
+    })
+  }
 
-  const cashierRole = await prisma.role.upsert({
-    where: { id: 3 },
-    update: { name: ROLES.CASHIER },
-    create: { id: 3, name: ROLES.CASHIER, shopId: shop.id },
+  let cashierRole = await prisma.role.findFirst({
+    where: { name: ROLES.CASHIER, shopId: shop.id },
   })
+  if (!cashierRole) {
+    cashierRole = await prisma.role.create({
+      data: { name: ROLES.CASHIER, shopId: shop.id },
+    })
+  }
 
   // ==========================================
   // 3. USERS
@@ -431,9 +454,10 @@ async function main() {
   // ==========================================
   console.log('\n✅ Seed completed successfully!')
   console.log('\n👤 USERS:')
-  console.log('   📧 admin@routincafe.com    / password123  [Admin]')
-  console.log('   📧 manager@routincafe.com  / password123  [Manager]')
-  console.log('   📧 cashier@routincafe.com  / password123  [Cashier]')
+  console.log(`   🔑 Credentials Source: ${passwordSource}`)
+  console.log('   📧 admin@routincafe.com    [Admin]')
+  console.log('   📧 manager@routincafe.com  [Manager]')
+  console.log('   📧 cashier@routincafe.com  [Cashier]')
   console.log('\n📦 CATALOG:')
   console.log(`   🗂️  ${Object.keys(categories).length} categories seeded`)
   console.log(`   🛍️  ${Object.keys(products).length} products seeded`)
