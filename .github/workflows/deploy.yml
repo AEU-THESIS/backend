@@ -1,0 +1,21 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: ['prod', 'main']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/projects/rountin-cafe/backend
+            git pull origin prod
+            cd ..
+            sh deploy.sh
