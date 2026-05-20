@@ -76,6 +76,7 @@ export const authService = {
         email: user.email,
         shop_id: user.shopId,
         role,
+        image_url: user.imageUrl,
       },
     }
   },
