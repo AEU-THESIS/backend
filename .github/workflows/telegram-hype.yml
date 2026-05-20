@@ -4,6 +4,7 @@ on:
     types: [closed]
     branches:
       - dev
+      - prod
 
 jobs:
   notify:
@@ -27,34 +28,52 @@ jobs:
 
       - name: Send Telegram Message directly via API
         env:
-          PR_TITLE: ${{ toJson(github.event.pull_request.title) }}
-          PR_MERGED_BY: ${{ toJson(github.event.pull_request.merged_by.login) }}
-          PR_URL: ${{ toJson(github.event.pull_request.html_url) }}
-          TICKET_LINE: ${{ toJson(steps.extract_jira.outputs.ticket_line) }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          TICKET_LINE: ${{ steps.extract_jira.outputs.ticket_line }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
-          # Safely package the message into a JSON file using args
-          jq -n \
-            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --arg topic_id "${{ secrets.TELEGRAM_TOPIC_ID }}" \
-            --argjson title "$PR_TITLE" \
-            --argjson merged_by "$PR_MERGED_BY" \
-            --argjson url "$PR_URL" \
-            --argjson ticket "$TICKET_LINE" \
-            --arg text " <b>New Feature Merged to Dev (backend)!</b> 🚀
+          function map_user() {
+            case "$1" in
+              "SORIYAHO") echo "@yaIssMe" ;;
+              "Visal2442") echo "@Sork_Visal" ;;
+              "Johnrak11") echo "@johnrak" ;;
+              "seangengise") echo "@ith_seang_eng" ;;
+              *) echo "@$1" ;;
+            esac
+          }
 
-          👨‍💻 <b>Merged By:</b> $merged_by
-          📌 <b>Task:</b> $title
-          $ticket
+          TG_MERGED_BY=$(map_user "$PR_MERGED_BY")
+          TG_USER=$(map_user "$PR_USER")
 
-          🔗 <a href=\"$url\">View the Pull Request</a>
-
-          Everyone pull the latest code and check it out! 🔥" \
-            '{
-              chat_id: $chat_id,
-              message_thread_id: $topic_id,
-              parse_mode: "HTML",
-              text: $text
-            }' > payload.json
+          if [ "$TARGET_BRANCH" = "prod" ] || [ "$TARGET_BRANCH" = "main" ]; then
+            jq -n \
+              --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --arg topic_id "${{ secrets.TELEGRAM_TOPIC_ID }}" \
+              '{
+                chat_id: $chat_id,
+                message_thread_id: $topic_id,
+                parse_mode: "HTML",
+                text: "Hello team lasted code from dev was merge to prod, server live on https://routincafe.johnrak.online/"
+              }' > payload.json
+          else
+            jq -n \
+              --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --arg topic_id "${{ secrets.TELEGRAM_TOPIC_ID }}" \
+              --arg title "$PR_TITLE" \
+              --arg merged_by "$TG_MERGED_BY" \
+              --arg user "$TG_USER" \
+              --arg url "$PR_URL" \
+              --arg ticket "$TICKET_LINE" \
+              '{
+                chat_id: $chat_id,
+                message_thread_id: $topic_id,
+                parse_mode: "HTML",
+                text: ("Hello " + $user + " your PR was Merged to Dev (backend)!\n\n- Merged By: " + $merged_by + "\n- Assign to : " + $user + "\n📌 Task: " + $title + "\n" + (if $ticket != "" then $ticket + "\n\n" else "\n" end) + "🔗 <a href=\"" + $url + "\">View the Pull Request</a>\n\nEveryone pull the latest code and check it out! 🔥")
+              }' > payload.json
+          fi
             
           # Send it to Telegram and check for success
           RESPONSE=$(curl -S -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
