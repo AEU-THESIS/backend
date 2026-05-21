@@ -29,7 +29,7 @@ app.use(
  */
 const allowList =
   process.env.NODE_ENV === 'production'
-    ? ['https://routincafe.com'] // Strict Production Domains
+    ? ['https://routincafe.johnrak.online'] // Strict Production Domains
     : ['http://localhost:5173', 'http://localhost:3000'] // Local / Staging React Vite ports
 
 app.use(
