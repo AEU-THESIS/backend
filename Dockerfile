@@ -8,7 +8,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Install all dependencies (including devDependencies required for typescript build and prisma generation)
-RUN npm install
+RUN npm ci
 
 # Copy Prisma schema and configuration
 COPY prisma ./prisma/
@@ -25,5 +25,11 @@ RUN npm run build
 # Expose port 3000 for network access
 EXPOSE 3000
 
-# Push schema changes to MariaDB and start server on container runtime
-CMD ["sh", "-c", "npx prisma db push && node dist/src/server.js"]
+# Set ownership to the built-in non-root 'node' user
+RUN chown -R node:node /usr/src/app
+
+# Drop privileges
+USER node
+
+# Start the server without performing schema mutations
+CMD ["node", "dist/src/server.js"]
