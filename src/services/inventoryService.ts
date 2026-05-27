@@ -2,6 +2,7 @@ import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   AdjustInventoryItemInput,
   CreateInventoryItemInput,
+  InventoryQueryInput,
   UpdateInventoryItemInput,
 } from '../validations/inventoryValidation'
 
@@ -72,13 +73,29 @@ const getExistingInventoryItem = async (id: number, shopId: number) => {
 }
 
 export const inventoryService = {
-  async getAll(shopId: number) {
+  async getAll(shopId: number, query: InventoryQueryInput = {}) {
+    const search = query.search?.trim()
+    const unit = query.unit?.trim()
     const items = await prisma.inventoryItem.findMany({
-      where: { shopId, isDeleted: false },
+      where: {
+        shopId,
+        isDeleted: false,
+        ...(unit && { unitOfMeasure: unit }),
+        ...(search && {
+          OR: [
+            { name: { contains: search } },
+            { sku: { contains: search } },
+            { unitOfMeasure: { contains: search } },
+          ],
+        }),
+      },
       orderBy: { updatedAt: 'desc' },
     })
 
-    return items.map(mapInventoryItem)
+    const mappedItems = items.map(mapInventoryItem)
+    if (!query.status) return mappedItems
+
+    return mappedItems.filter(item => item.status === query.status)
   },
 
   async create(shopId: number, data: CreateInventoryItemInput, imageUrl?: string) {

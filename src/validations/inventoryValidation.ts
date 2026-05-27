@@ -63,6 +63,13 @@ export const adjustInventoryItemSchema = z.object({
   notes: z.string().trim().optional().nullable(),
 })
 
+export const inventoryQuerySchema = z.object({
+  search: z.string().trim().optional(),
+  status: z.enum(['in_stock', 'low_stock', 'out_of_stock']).optional(),
+  unit: z.string().trim().optional(),
+})
+
 export type CreateInventoryItemInput = z.infer<typeof createInventoryItemSchema>
 export type UpdateInventoryItemInput = z.infer<typeof updateInventoryItemSchema>
 export type AdjustInventoryItemInput = z.infer<typeof adjustInventoryItemSchema>
+export type InventoryQueryInput = z.infer<typeof inventoryQuerySchema>

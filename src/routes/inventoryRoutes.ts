@@ -7,6 +7,11 @@ import { upload } from '../utils/fileUpload'
 
 const router = Router()
 
+router.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store')
+  next()
+})
+
 router.use(authenticate)
 router.use(requireRoles([ROLES.ADMIN, ROLES.MANAGER]))
 

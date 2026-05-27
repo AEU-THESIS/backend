@@ -24,4 +24,16 @@ export const Messages = {
   ACCOUNT_DEACTIVATED: 'Your account has been deactivated. Please contact an administrator.',
   INVALID_SHOP_SCOPE: 'Invalid shop scope provided',
   INSUFFICIENT_STOCK: 'Insufficient stock for this adjustment',
+  // Products & Categories
+  CATEGORY_NOT_FOUND: 'Category not found',
+  PRODUCT_NOT_FOUND: 'Product not found or does not belong to this shop',
+  // Orders
+  ORDER_CREATED: 'Order placed successfully',
+  ORDER_NOT_FOUND: 'Order not found',
+  INSUFFICIENT_PAYMENT: 'Received amount is insufficient for the total',
+  ORDER_VALIDATION_FAILED: 'One or more items in the order are invalid',
+  // Inventory
+  INGREDIENT_NOT_FOUND: 'Ingredient not found',
+  STOCK_UPDATED: 'Stock updated successfully',
+  INSUFFICIENT_STOCK: 'Insufficient stock for one or more items',
 } as const

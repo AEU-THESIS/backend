@@ -10,6 +10,7 @@ import { idParamSchema } from '../validations/commonValidation'
 import {
   adjustInventoryItemSchema,
   createInventoryItemSchema,
+  inventoryQuerySchema,
   updateInventoryItemSchema,
 } from '../validations/inventoryValidation'
 import { inventoryService } from '../services/inventoryService'
@@ -22,7 +23,8 @@ const getUploadedImageUrl = async (req: Request) => {
 
 export const inventoryController = {
   getAll: catchAsync(async (req: Request, res: Response) => {
-    const result = await inventoryService.getAll(req.user!.shop_id)
+    const query = inventoryQuerySchema.parse(req.query)
+    const result = await inventoryService.getAll(req.user!.shop_id, query)
     return sendSuccess(res, result)
   }),
 

@@ -146,3 +146,10 @@ vite.config.ts.timestamp-*
 *.swp
 .DS_Store
 Thumbs.db
+
+# Seed Credentials
+.seed-password
+
+certs/*.key
+certs/*.pem
+certs/*
