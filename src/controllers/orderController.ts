@@ -8,7 +8,12 @@ import {
   Messages,
 } from '../core/Controller'
 import { orderService } from '../services/orderService'
-import { CreateOrderSchema } from '../validations/orderValidation'
+import {
+  CreateOrderSchema,
+  GetOrdersQuerySchema,
+  GetOrderParamsSchema,
+  UpdateOrderStatusSchema,
+} from '../validations/orderValidation'
 import { AppError } from '../utils/appError'
 import { orderSseController } from './orderSseController'
 
@@ -24,69 +29,72 @@ export const orderController = {
 
     const result = await orderService.createOrder(userId, shopId, parsed.data)
 
-    // Broadcast the newly created full order tree to connected kitchen staff
-    try {
-      const fullOrder = await orderService.getOrderById(shopId, result.id)
-      orderSseController.broadcastToShop(shopId, 'order_created', fullOrder)
-    } catch (sseError) {
-      console.error('⚠️ [SSE] Failed to broadcast new order to kitchen:', sseError)
-    }
+    // Broadcast the newly created full order tree to connected kitchen staff asynchronously
+    ;(async () => {
+      try {
+        const fullOrder = await orderService.getOrderById(shopId, result.id)
+        orderSseController.safeBroadcastToShop(shopId, 'order_created', fullOrder)
+      } catch (sseError) {
+        console.error('⚠️ [SSE] Failed to broadcast new order to kitchen:', sseError)
+      }
+    })()
 
     return sendSuccess(res, result, Messages.ORDER_CREATED, HttpStatus.CREATED)
   }),
 
   getAll: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const { status, paymentStatus, date, search, startDate, endDate, page, limit } = req.query
 
-    const result = await orderService.getAllOrders(shopId, {
-      status: status ? String(status) : undefined,
-      paymentStatus: paymentStatus ? String(paymentStatus) : undefined,
-      date: date ? String(date) : undefined,
-      search: search ? String(search) : undefined,
-      startDate: startDate ? String(startDate) : undefined,
-      endDate: endDate ? String(endDate) : undefined,
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-    })
+    const parsed = GetOrdersQuerySchema.safeParse(req.query)
+    if (!parsed.success) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
 
-    return sendSuccess(res, result, 'Orders retrieved successfully')
+    const result = await orderService.getAllOrders(shopId, parsed.data)
+
+    return sendSuccess(res, result, Messages.ORDERS_RETRIEVED, HttpStatus.OK)
   }),
 
   getById: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const id = Number(req.params.id)
 
-    if (isNaN(id)) {
-      throw new AppError('Invalid order ID', HttpStatus.BAD_REQUEST)
+    const parsed = GetOrderParamsSchema.safeParse(req.params)
+    if (!parsed.success) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
 
-    const order = await orderService.getOrderById(shopId, id)
-    return sendSuccess(res, order, 'Order retrieved successfully')
+    const order = await orderService.getOrderById(shopId, parsed.data.id)
+    return sendSuccess(res, order, Messages.ORDER_RETRIEVED, HttpStatus.OK)
   }),
 
   updateStatus: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const id = Number(req.params.id)
-    const { status } = req.body
 
-    if (isNaN(id)) {
-      throw new AppError('Invalid order ID', HttpStatus.BAD_REQUEST)
+    const parsed = UpdateOrderStatusSchema.safeParse({
+      id: Number(req.params.id),
+      status: req.body.status,
+    })
+
+    if (!parsed.success) {
+      const errorMap = parsed.error.flatten().fieldErrors
+      if (errorMap.id) {
+        throw new AppError(Messages.INVALID_ORDER_ID, HttpStatus.BAD_REQUEST)
+      }
+      if (errorMap.status) {
+        throw new AppError(Messages.STATUS_REQUIRED, HttpStatus.BAD_REQUEST)
+      }
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
 
-    if (!status) {
-      throw new AppError('Status is required', HttpStatus.BAD_REQUEST)
-    }
-
-    const updatedOrder = await orderService.updateOrderStatus(shopId, id, status)
+    const updatedOrder = await orderService.updateOrderStatus(
+      shopId,
+      parsed.data.id,
+      parsed.data.status
+    )
 
     // Broadcast the status update to all connected screens instantly
-    try {
-      orderSseController.broadcastToShop(shopId, 'order_updated', updatedOrder)
-    } catch (sseError) {
-      console.error('⚠️ [SSE] Failed to broadcast order status update:', sseError)
-    }
+    orderSseController.safeBroadcastToShop(shopId, 'order_updated', updatedOrder)
 
-    return sendSuccess(res, updatedOrder, 'Order status updated successfully')
+    return sendSuccess(res, updatedOrder, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
   }),
 }

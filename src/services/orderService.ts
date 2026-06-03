@@ -1,5 +1,6 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { CreateOrderInput } from '../validations/orderValidation'
+import { Prisma } from '@prisma/client'
 
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
@@ -232,6 +233,24 @@ export const orderService = {
       page = 1,
       limit = 50,
     } = filters
+
+    // Pre-query validation guards
+    if (!Number.isInteger(page) || page <= 0) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+    if (startDate && isNaN(Date.parse(startDate))) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+    if (endDate && isNaN(Date.parse(endDate))) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+    if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
     const skip = (page - 1) * limit
 
     // Build query conditions
@@ -363,23 +382,31 @@ export const orderService = {
     }
 
     // 3. Update fulfillmentStatus
-    const updatedOrder = await prisma.order.update({
-      where: {
-        id: orderId,
-      },
-      data: {
-        fulfillmentStatus: status,
-      },
-      include: {
-        items: {
-          include: {
-            product: true,
-            options: true,
+    try {
+      const updatedOrder = await prisma.order.update({
+        where: {
+          id: orderId,
+          shopId,
+        },
+        data: {
+          fulfillmentStatus: status,
+        },
+        include: {
+          items: {
+            include: {
+              product: true,
+              options: true,
+            },
           },
         },
-      },
-    })
+      })
 
-    return updatedOrder
+      return updatedOrder
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+      }
+      throw error
+    }
   },
 }

@@ -44,14 +44,14 @@ async function main() {
     where: { id: 1 },
     update: {},
     create: {
-      name: 'RoutinCafe',
+      name: 'Routine Café & Bakery',
       slug: 'routincafe',
       ownerName: 'Admin',
       currencySymbol: '$',
       exchangeRate: 4100,
       phone: '+855 12 345 678',
       address: 'Phnom Penh, Cambodia',
-      receiptFooter: 'Thank you for visiting RoutinCafe! ☕',
+      receiptFooter: 'Thank you for visiting Routine Café & Bakery!☕',
     },
   })
 

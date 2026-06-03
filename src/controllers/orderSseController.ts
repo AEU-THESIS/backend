@@ -1,4 +1,4 @@
-import { Request, Response } from 'express'
+import { Request, Response, HttpStatus, Messages } from '../core/Controller'
 
 // Map of shopId -> Array of active client responses
 const activeClients = new Map<number, Response[]>()
@@ -8,7 +8,9 @@ export const orderSseController = {
     const shopId = req.user?.shop_id
 
     if (!shopId) {
-      res.status(400).json({ success: false, message: 'Shop ID is required' })
+      res
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ success: false, message: Messages.SHOP_ID_REQUIRED })
       return
     }
 
@@ -72,5 +74,13 @@ export const orderSseController = {
         console.error(`❌ Failed to send SSE payload to a client in Shop #${shopId}`, error)
       }
     })
+  },
+
+  safeBroadcastToShop(shopId: number, event: 'order_created' | 'order_updated', orderData: any) {
+    try {
+      this.broadcastToShop(shopId, event, orderData)
+    } catch (error) {
+      console.error(`⚠️ [SSE] safeBroadcastToShop failed for Shop #${shopId}:`, error)
+    }
   },
 }

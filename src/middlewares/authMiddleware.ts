@@ -31,7 +31,10 @@ const getBearerToken = (req: Request) => {
 
   const queryToken = req.query.token
   if (typeof queryToken === 'string' && queryToken) {
-    return queryToken
+    const isSseRoute = req.path.endsWith('/stream') && req.method === 'GET'
+    if (isSseRoute) {
+      return queryToken
+    }
   }
 
   throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
