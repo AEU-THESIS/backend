@@ -139,6 +139,14 @@ export const orderService = {
     // ── 5. Generate order number ───────────────────────────────────────
     const orderNumber = `ORD-${Date.now().toString().slice(-7)}`
 
+    // Fetch the shop settings to check if order management dashboard is enabled
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { isOrderManagementEnabled: true },
+    })
+
+    const fulfillmentStatus = shop?.isOrderManagementEnabled !== false ? 'preparing' : 'completed'
+
     // ── 6. Atomic transaction: Order + Items + Options + Inventory ────
     const order = await prisma.$transaction(async tx => {
       // Create the Order
@@ -155,7 +163,7 @@ export const orderService = {
           exchangeRateSnapshot,
           paymentMethod,
           paymentStatus: 'paid',
-          fulfillmentStatus: 'preparing',
+          fulfillmentStatus,
         },
       })
 
@@ -199,5 +207,179 @@ export const orderService = {
       paymentStatus: order.paymentStatus,
       fulfillmentStatus: order.fulfillmentStatus,
     }
+  },
+
+  async getAllOrders(
+    shopId: number,
+    filters: {
+      status?: string
+      paymentStatus?: string
+      date?: string
+      search?: string
+      startDate?: string
+      endDate?: string
+      page?: number
+      limit?: number
+    }
+  ) {
+    const {
+      status,
+      paymentStatus,
+      date,
+      search,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 50,
+    } = filters
+    const skip = (page - 1) * limit
+
+    // Build query conditions
+    const whereClause: any = {
+      shopId,
+    }
+
+    // Status filter (preparing, ready, completed, canceled)
+    if (status) {
+      whereClause.fulfillmentStatus = status
+    }
+
+    // Payment status filter (paid, unpaid)
+    if (paymentStatus) {
+      whereClause.paymentStatus = paymentStatus
+    }
+
+    // Date filters
+    if (date === 'today') {
+      const startOfDay = new Date()
+      startOfDay.setHours(0, 0, 0, 0)
+      const endOfDay = new Date()
+      endOfDay.setHours(23, 59, 59, 999)
+      whereClause.createdAt = {
+        gte: startOfDay,
+        lte: endOfDay,
+      }
+    } else if (startDate || endDate) {
+      whereClause.createdAt = {}
+      if (startDate) {
+        whereClause.createdAt.gte = new Date(startDate)
+      }
+      if (endDate) {
+        const end = new Date(endDate)
+        // Make sure it goes until the end of the endDate day
+        end.setHours(23, 59, 59, 999)
+        whereClause.createdAt.lte = end
+      }
+    }
+
+    // Search filter (fuzzy match on orderNumber or customerName)
+    if (search) {
+      whereClause.OR = [
+        {
+          orderNumber: {
+            contains: search,
+          },
+        },
+        {
+          customerName: {
+            contains: search,
+          },
+        },
+      ]
+    }
+
+    // Fetch total matching records and items paginated
+    const [total, orders] = await Promise.all([
+      prisma.order.count({ where: whereClause }),
+      prisma.order.findMany({
+        where: whereClause,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip,
+        take: limit,
+        include: {
+          items: {
+            include: {
+              product: true,
+              options: true,
+            },
+          },
+        },
+      }),
+    ])
+
+    return {
+      orders,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    }
+  },
+
+  async getOrderById(shopId: number, orderId: number) {
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        shopId,
+      },
+      include: {
+        items: {
+          include: {
+            product: true,
+            options: true,
+          },
+        },
+      },
+    })
+
+    if (!order) {
+      throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    return order
+  },
+
+  async updateOrderStatus(shopId: number, orderId: number, status: string) {
+    // 1. Validate status value
+    const validStatuses = ['preparing', 'ready', 'completed', 'canceled']
+    if (!validStatuses.includes(status)) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
+    // 2. Find order and verify shop ownership
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        shopId,
+      },
+    })
+
+    if (!order) {
+      throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    // 3. Update fulfillmentStatus
+    const updatedOrder = await prisma.order.update({
+      where: {
+        id: orderId,
+      },
+      data: {
+        fulfillmentStatus: status,
+      },
+      include: {
+        items: {
+          include: {
+            product: true,
+            options: true,
+          },
+        },
+      },
+    })
+
+    return updatedOrder
   },
 }

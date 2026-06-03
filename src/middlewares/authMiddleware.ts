@@ -22,22 +22,24 @@ declare global {
   }
 }
 
-const getBearerToken = (authorizationHeader?: string) => {
-  if (!authorizationHeader?.startsWith('Bearer ')) {
-    throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+const getBearerToken = (req: Request) => {
+  const authorizationHeader = req.headers.authorization
+  if (authorizationHeader?.startsWith('Bearer ')) {
+    const token = authorizationHeader.split(' ')[1]
+    if (token) return token
   }
 
-  const token = authorizationHeader.split(' ')[1]
-  if (!token) {
-    throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
+  const queryToken = req.query.token
+  if (typeof queryToken === 'string' && queryToken) {
+    return queryToken
   }
 
-  return token
+  throw new AppError(Messages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED)
 }
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const token = getBearerToken(req.headers.authorization)
+    const token = getBearerToken(req)
     const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as AuthTokenPayload
 
     // Check if the token has been blacklisted (logout invalidation)
