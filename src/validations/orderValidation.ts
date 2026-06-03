@@ -25,3 +25,29 @@ export const CreateOrderSchema = z.strictObject({
 })
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>
+
+export const GetOrdersQuerySchema = z.object({
+  status: z.string().optional(),
+  paymentStatus: z.string().optional(),
+  date: z.string().optional(),
+  search: z.string().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().optional(),
+})
+
+export type GetOrdersQueryInput = z.infer<typeof GetOrdersQuerySchema>
+
+export const GetOrderParamsSchema = z.object({
+  id: z.coerce.number().int().positive('Invalid order ID'),
+})
+
+export type GetOrderParamsInput = z.infer<typeof GetOrderParamsSchema>
+
+export const UpdateOrderStatusSchema = z.object({
+  id: z.coerce.number().int().positive('Invalid order ID'),
+  status: z.string().min(1, 'Status is required'),
+})
+
+export type UpdateOrderStatusInput = z.infer<typeof UpdateOrderStatusSchema>

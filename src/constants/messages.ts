@@ -11,6 +11,7 @@ export const Messages = {
   EMAIL_SEND_FAILED: 'Failed to send email',
   // Modules
   SHOP_NOT_FOUND: 'Shop not found',
+  SHOP_ID_REQUIRED: 'Shop ID is required',
   SHOP_SLUG_EXISTS: 'Shop slug already exists',
   USER_NOT_FOUND: 'User not found',
   USER_ALREADY_EXISTS: 'User with this email already exists',
@@ -23,16 +24,21 @@ export const Messages = {
   INVALID_RESET_TOKEN: 'Invalid or expired reset token',
   ACCOUNT_DEACTIVATED: 'Your account has been deactivated. Please contact an administrator.',
   INVALID_SHOP_SCOPE: 'Invalid shop scope provided',
+  INSUFFICIENT_STOCK: 'Insufficient stock for this adjustment',
   // Products & Categories
   CATEGORY_NOT_FOUND: 'Category not found',
   PRODUCT_NOT_FOUND: 'Product not found or does not belong to this shop',
   // Orders
   ORDER_CREATED: 'Order placed successfully',
+  ORDER_RETRIEVED: 'Order retrieved successfully',
   ORDER_NOT_FOUND: 'Order not found',
+  INVALID_ORDER_ID: 'Invalid order ID',
+  STATUS_REQUIRED: 'Status is required',
+  ORDER_STATUS_UPDATED: 'Order status updated successfully',
   INSUFFICIENT_PAYMENT: 'Received amount is insufficient for the total',
   ORDER_VALIDATION_FAILED: 'One or more items in the order are invalid',
+  ORDERS_RETRIEVED: 'Orders retrieved successfully',
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',
-  INSUFFICIENT_STOCK: 'Insufficient stock for one or more items',
 } as const

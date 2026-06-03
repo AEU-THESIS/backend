@@ -12,6 +12,7 @@ const shopSettingsSelect = {
   currencySymbol: true,
   exchangeRate: true,
   receiptFooter: true,
+  isOrderManagementEnabled: true,
   createdAt: true,
   updatedAt: true,
 } as const
