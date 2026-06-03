@@ -1,0 +1,2 @@
+-- Duplicate inventory tables removed.
+-- Inventory data uses the existing ingredients and ingredient_logs tables.

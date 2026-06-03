@@ -23,6 +23,7 @@ export const Messages = {
   INVALID_RESET_TOKEN: 'Invalid or expired reset token',
   ACCOUNT_DEACTIVATED: 'Your account has been deactivated. Please contact an administrator.',
   INVALID_SHOP_SCOPE: 'Invalid shop scope provided',
+  INSUFFICIENT_STOCK: 'Insufficient stock for this adjustment',
   // Products & Categories
   CATEGORY_NOT_FOUND: 'Category not found',
   PRODUCT_NOT_FOUND: 'Product not found or does not belong to this shop',
@@ -34,5 +35,4 @@ export const Messages = {
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',
-  INSUFFICIENT_STOCK: 'Insufficient stock for one or more items',
 } as const
