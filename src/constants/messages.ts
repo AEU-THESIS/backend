@@ -35,5 +35,4 @@ export const Messages = {
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',
-  INSUFFICIENT_STOCK: 'Insufficient stock for one or more items',
 } as const

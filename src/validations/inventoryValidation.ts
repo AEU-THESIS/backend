@@ -10,7 +10,6 @@ const positiveDecimal = decimalInput.refine(value => value > 0, 'Quantity must b
 
 const inventoryItemBaseSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
-  sku: z.string().trim().optional().nullable(),
   unitOfMeasure: z.string().trim().min(1, 'Unit of measure is required').optional(),
   unit_of_measure: z.string().trim().min(1, 'Unit of measure is required').optional(),
   quantity: nonNegativeDecimal.default(0),

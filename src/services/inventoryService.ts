@@ -18,28 +18,24 @@ const mapInventoryItem = (item: {
   id: number
   shopId: number
   name: string
-  sku: string | null
   unitOfMeasure: string
-  quantity: unknown
-  minAlertThreshold: unknown
+  currentStock: unknown
+  lowStockThreshold: unknown
   imageUrl: string | null
-  createdAt: Date
   updatedAt: Date
 }) => {
-  const quantity = toNumber(item.quantity)
-  const minAlertThreshold = toNumber(item.minAlertThreshold)
+  const quantity = toNumber(item.currentStock)
+  const minAlertThreshold = toNumber(item.lowStockThreshold)
 
   return {
     id: item.id,
     shopId: item.shopId,
     name: item.name,
-    sku: item.sku,
     unitOfMeasure: item.unitOfMeasure,
     quantity,
     minAlertThreshold,
     imageUrl: item.imageUrl,
     status: getInventoryStatus(quantity, minAlertThreshold),
-    createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   }
 }
@@ -61,8 +57,8 @@ const getMinAlertThreshold = (data: CreateInventoryItemInput | UpdateInventoryIt
 }
 
 const getExistingInventoryItem = async (id: number, shopId: number) => {
-  const item = await prisma.inventoryItem.findFirst({
-    where: { id, shopId, isDeleted: false },
+  const item = await prisma.ingredient.findFirst({
+    where: { id, shopId },
   })
 
   if (!item) {
@@ -76,17 +72,12 @@ export const inventoryService = {
   async getAll(shopId: number, query: InventoryQueryInput = {}) {
     const search = query.search?.trim()
     const unit = query.unit?.trim()
-    const items = await prisma.inventoryItem.findMany({
+    const items = await prisma.ingredient.findMany({
       where: {
         shopId,
-        isDeleted: false,
         ...(unit && { unitOfMeasure: unit }),
         ...(search && {
-          OR: [
-            { name: { contains: search } },
-            { sku: { contains: search } },
-            { unitOfMeasure: { contains: search } },
-          ],
+          OR: [{ name: { contains: search } }, { unitOfMeasure: { contains: search } }],
         }),
       },
       orderBy: { updatedAt: 'desc' },
@@ -99,14 +90,13 @@ export const inventoryService = {
   },
 
   async create(shopId: number, data: CreateInventoryItemInput, imageUrl?: string) {
-    const item = await prisma.inventoryItem.create({
+    const item = await prisma.ingredient.create({
       data: {
         shopId,
         name: data.name,
-        sku: data.sku || null,
         unitOfMeasure: getUnitOfMeasure(data) || 'unit',
-        quantity: data.quantity,
-        minAlertThreshold: getMinAlertThreshold(data) ?? 0,
+        currentStock: data.quantity,
+        lowStockThreshold: getMinAlertThreshold(data) ?? 0,
         imageUrl,
       },
     })
@@ -117,15 +107,14 @@ export const inventoryService = {
   async update(id: number, shopId: number, data: UpdateInventoryItemInput, imageUrl?: string) {
     await getExistingInventoryItem(id, shopId)
 
-    const item = await prisma.inventoryItem.update({
+    const item = await prisma.ingredient.update({
       where: { id },
       data: {
         ...(data.name !== undefined && { name: data.name }),
-        ...(data.sku !== undefined && { sku: data.sku || null }),
         ...(getUnitOfMeasure(data) !== undefined && { unitOfMeasure: getUnitOfMeasure(data) }),
-        ...(data.quantity !== undefined && { quantity: data.quantity }),
+        ...(data.quantity !== undefined && { currentStock: data.quantity }),
         ...(getMinAlertThreshold(data) !== undefined && {
-          minAlertThreshold: getMinAlertThreshold(data),
+          lowStockThreshold: getMinAlertThreshold(data),
         }),
         ...(imageUrl !== undefined && { imageUrl }),
       },
@@ -137,19 +126,15 @@ export const inventoryService = {
   async delete(id: number, shopId: number) {
     await getExistingInventoryItem(id, shopId)
 
-    await prisma.inventoryItem.update({
+    await prisma.ingredient.delete({
       where: { id },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-      },
     })
   },
 
   async adjust(id: number, shopId: number, userId: number, data: AdjustInventoryItemInput) {
     return prisma.$transaction(async tx => {
-      const item = await tx.inventoryItem.findFirst({
-        where: { id, shopId, isDeleted: false },
+      const item = await tx.ingredient.findFirst({
+        where: { id, shopId },
       })
 
       if (!item) {
@@ -159,15 +144,14 @@ export const inventoryService = {
       const changeAmount = data.change_amount
 
       if (data.adjustment_type === 'remove') {
-        const result = await tx.inventoryItem.updateMany({
+        const result = await tx.ingredient.updateMany({
           where: {
             id,
             shopId,
-            isDeleted: false,
-            quantity: { gte: changeAmount },
+            currentStock: { gte: changeAmount },
           },
           data: {
-            quantity: { decrement: changeAmount },
+            currentStock: { decrement: changeAmount },
           },
         })
 
@@ -175,25 +159,25 @@ export const inventoryService = {
           throw new AppError(Messages.INSUFFICIENT_STOCK, HttpStatus.BAD_REQUEST)
         }
       } else {
-        await tx.inventoryItem.update({
+        await tx.ingredient.update({
           where: { id },
           data: {
-            quantity: { increment: changeAmount },
+            currentStock: { increment: changeAmount },
           },
         })
       }
 
-      await tx.inventoryLog.create({
+      await tx.ingredientLog.create({
         data: {
-          inventoryItemId: id,
+          ingredientId: id,
           userId,
-          adjustmentType: data.adjustment_type,
+          transactionType: data.adjustment_type,
           quantityChanged: changeAmount,
-          notes: data.notes || null,
+          reason: data.notes || null,
         },
       })
 
-      const updatedItem = await tx.inventoryItem.findUniqueOrThrow({
+      const updatedItem = await tx.ingredient.findUniqueOrThrow({
         where: { id },
       })
 

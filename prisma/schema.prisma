@@ -33,7 +33,6 @@ model Shop {
   optionSets     OptionSet[]
   promotions     Promotion[]
   ingredients    Ingredient[]
-  inventoryItems InventoryItem[]
   notifications  Notification[]
   shopTables     ShopTable[]
   orders         Order[]
@@ -67,7 +66,6 @@ model User {
   shop           Shop                  @relation(fields: [shopId], references: [id])
   roles          RoleUser[]
   ingredientLogs IngredientLog[]
-  inventoryLogs  InventoryLog[]
   orders         Order[]
   personalTokens PersonalAccessToken[]
 
@@ -253,6 +251,7 @@ model Ingredient {
   unitOfMeasure     String   @map("unit_of_measure")
   currentStock      Decimal  @default(0.00) @map("current_stock") @db.Decimal(10, 2)
   lowStockThreshold Decimal  @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
+  imageUrl          String?  @map("image_url") @db.LongText
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   shop    Shop            @relation(fields: [shopId], references: [id])
@@ -287,46 +286,6 @@ model IngredientLog {
   user       User       @relation(fields: [userId], references: [id])
 
   @@map("ingredient_logs")
-}
-
-model InventoryItem {
-  id                Int       @id @default(autoincrement())
-  shopId            Int       @map("shop_id")
-  name              String
-  sku               String?
-  unitOfMeasure     String    @map("unit_of_measure")
-  quantity          Decimal   @default(0.00) @db.Decimal(10, 2)
-  minAlertThreshold Decimal   @default(0.00) @map("min_alert_threshold") @db.Decimal(10, 2)
-  imageUrl          String?   @map("image_url") @db.LongText
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-  deletedAt         DateTime? @map("deleted_at")
-  isDeleted         Boolean   @default(false) @map("is_deleted")
-
-  shop Shop           @relation(fields: [shopId], references: [id])
-  logs InventoryLog[]
-
-  @@map("inventory_items")
-}
-
-model InventoryLog {
-  id              Int            @id @default(autoincrement())
-  inventoryItemId Int            @map("inventory_item_id")
-  userId          Int            @map("user_id")
-  adjustmentType  AdjustmentType @map("adjustment_type")
-  quantityChanged Decimal        @map("quantity_changed") @db.Decimal(10, 2)
-  notes           String?        @db.Text
-  createdAt       DateTime       @default(now()) @map("created_at")
-
-  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
-  user          User          @relation(fields: [userId], references: [id])
-
-  @@map("inventory_logs")
-}
-
-enum AdjustmentType {
-  add
-  remove
 }
 
 // ==========================================
