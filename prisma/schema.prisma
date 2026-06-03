@@ -23,6 +23,7 @@ model Shop {
   currencySymbol  String   @default("$") @map("currency_symbol")
   exchangeRate    Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
   receiptFooter   String?  @map("receipt_footer") @db.Text
+  isOrderManagementEnabled Boolean @default(true) @map("is_order_management_enabled")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
