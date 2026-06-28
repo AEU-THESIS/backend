@@ -28,6 +28,9 @@ export const Messages = {
   // Products & Categories
   CATEGORY_NOT_FOUND: 'Category not found',
   PRODUCT_NOT_FOUND: 'Product not found or does not belong to this shop',
+  PRODUCT_CREATED: 'Product created successfully',
+  CATEGORY_CREATED: 'Category created successfully',
+  CATEGORY_UPDATED: 'Category updated successfully',
   // Orders
   ORDER_CREATED: 'Order placed successfully',
   ORDER_RETRIEVED: 'Order retrieved successfully',
