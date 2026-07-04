@@ -1,7 +1,61 @@
-import { prisma, AppError, HttpStatus } from '../core/Service'
+import { Prisma } from '@prisma/client'
+import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import { getPeriodStartDate } from '../utils/date'
 
 export const reportService = {
+  async getDailySummary(shopId: number, date?: string) {
+    let targetDate = new Date()
+
+    if (date) {
+      const parsed = new Date(`${date}T00:00:00`)
+      if (isNaN(parsed.getTime())) {
+        throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+      }
+      targetDate = parsed
+    }
+
+    const startOfDay = new Date(targetDate)
+    startOfDay.setHours(0, 0, 0, 0)
+
+    const endOfDay = new Date(targetDate)
+    endOfDay.setHours(23, 59, 59, 999)
+
+    const [rows, shop] = await Promise.all([
+      prisma.$queryRaw<
+        Array<{
+          total_revenue: string | null
+          cash_total: string | null
+          khqr_total: string | null
+        }>
+      >(Prisma.sql`
+        SELECT
+          COALESCE(SUM(total_amount), 0) AS total_revenue,
+          COALESCE(SUM(CASE WHEN LOWER(TRIM(payment_method)) = 'cash' THEN total_amount ELSE 0 END), 0) AS cash_total,
+          COALESCE(SUM(CASE WHEN LOWER(TRIM(payment_method)) = 'khqr' THEN total_amount ELSE 0 END), 0) AS khqr_total
+        FROM orders
+        WHERE shop_id = ${shopId}
+          AND LOWER(TRIM(payment_status)) = 'paid'
+          AND created_at BETWEEN ${startOfDay} AND ${endOfDay}
+      `),
+      // Read-only lookup of the shop's own exchange rate. Exposed here (rather than
+      // requiring a call to the admin-only /shops/settings endpoint) so Cashiers can
+      // render the KHR equivalent without needing elevated privileges.
+      prisma.shop.findUnique({
+        where: { id: shopId },
+        select: { exchangeRate: true },
+      }),
+    ])
+
+    const row = rows[0]
+
+    return {
+      total_revenue: Number(row?.total_revenue ?? 0),
+      cash_total: Number(row?.cash_total ?? 0),
+      khqr_total: Number(row?.khqr_total ?? 0),
+      exchange_rate: Number(shop?.exchangeRate ?? 4100),
+    }
+  },
+
   async getSalesOverview(shopId: number, period: 'daily' | 'weekly' | 'monthly') {
     const startDate = getPeriodStartDate(period)
 

@@ -215,6 +215,7 @@ export const orderService = {
     filters: {
       status?: string
       paymentStatus?: string
+      paymentMethod?: string
       date?: string
       search?: string
       startDate?: string
@@ -226,6 +227,7 @@ export const orderService = {
     const {
       status,
       paymentStatus,
+      paymentMethod,
       date,
       search,
       startDate,
@@ -266,6 +268,11 @@ export const orderService = {
     // Payment status filter (paid, unpaid)
     if (paymentStatus) {
       whereClause.paymentStatus = paymentStatus
+    }
+
+    // Payment method filter (cash, khqr)
+    if (paymentMethod) {
+      whereClause.paymentMethod = paymentMethod
     }
 
     // Date filters

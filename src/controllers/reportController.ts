@@ -53,4 +53,15 @@ export const reportController = {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     return res.status(200).send(csvContent)
   }),
+  getReportToday: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { date } = req.query
+
+    if (date !== undefined && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
+    const summary = await reportService.getDailySummary(shopId, date as string | undefined)
+    return sendSuccess(res, summary)
+  }),
 }

@@ -22,7 +22,8 @@ export const shopController = {
   }),
 
   getSettings: catchAsync(async (req: Request, res: Response) => {
-    const shop = await shopService.getSettings(req.user!.shop_id)
+    const shopId = req.user!.shop_id
+    const shop = await shopService.getSettings(shopId)
     return sendSuccess(res, shop)
   }),
 
