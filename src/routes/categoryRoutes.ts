@@ -13,4 +13,17 @@ router.get(
   categoryController.getAll
 )
 
+router.post(
+  '/',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  categoryController.create
+)
+
+router.put(
+  '/:id',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  categoryController.update
+)
 export default router
