@@ -44,4 +44,16 @@ export const Messages = {
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',
+  // Promotions
+  PROMOTION_NOT_FOUND: 'Promotion not found',
+  PROMOTION_CREATED: 'Promotion created successfully',
+  PROMOTION_UPDATED: 'Promotion updated successfully',
+  PROMOTION_DELETED: 'Promotion deleted successfully',
+  PROMOTION_SCOPE_REQUIRED:
+    'At least one category or product must be selected for a specific-scope promotion',
+  PROMOTION_PERCENTAGE_MAX: 'Percentage discount cannot exceed 100',
+  PROMOTION_DATE_ORDER: 'End date must be after the start date',
+  PROMOTION_INVALID_SCOPE_ITEMS:
+    'One or more selected categories or products do not belong to this shop',
+  PROMOTION_IN_USE: 'This promotion cannot be deleted because it has been used in orders',
 } as const
