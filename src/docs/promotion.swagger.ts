@@ -84,6 +84,16 @@
  *         description: Validation error or scope items not owned by the shop.
  *
  * @openapi
+ * /api/promotions/active:
+ *   get:
+ *     tags: [Promotions]
+ *     summary: List currently-active promotions for the POS cart (Admin/Manager/Cashier)
+ *     description: Enabled promotions within their optional date window, with scope arrays.
+ *     responses:
+ *       200:
+ *         description: Active promotions.
+ *
+ * @openapi
  * /api/promotions/{id}:
  *   get:
  *     tags: [Promotions]

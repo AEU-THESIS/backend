@@ -1,6 +1,8 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { CreateOrderInput } from '../validations/orderValidation'
 import { Prisma } from '@prisma/client'
+import { promotionService } from './promotionService'
+import { bestPromotion, type CartLineForCalc } from '../utils/promotionDiscount'
 
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
@@ -126,9 +128,24 @@ export const orderService = {
     }
     serverTotal = Math.round(serverTotal * 100) / 100
 
-    // ── 3. Validate received amount is sufficient ─────────────────────
+    // ── 2b. Server-side promotion application ─────────────────────────
+    // Independently fetch the shop's active promotions and recompute the discount
+    // here — never trust a client-supplied discount. At most one promotion applies
+    // (the largest-discount match). serverTotal is the pre-discount subtotal.
+    const cartLines: CartLineForCalc[] = validatedItemsList.map(v => ({
+      productId: v.productId,
+      categoryId: productMap.get(v.productId)!.categoryId,
+      subtotal: v.subtotal,
+    }))
+    const activePromotions = await promotionService.getActiveByShop(shopId)
+    const applied = bestPromotion(activePromotions, cartLines)
+    const discountAmount = applied?.discount ?? 0
+    const appliedPromotionId = applied?.promotion.id ?? null
+    const netTotal = Math.round((serverTotal - discountAmount) * 100) / 100
+
+    // ── 3. Validate received amount is sufficient (against the net total) ─
     const totalInPaymentCurrency =
-      paymentCurrency === 'KHR' ? Math.ceil(serverTotal * exchangeRateSnapshot) : serverTotal
+      paymentCurrency === 'KHR' ? Math.ceil(netTotal * exchangeRateSnapshot) : netTotal
 
     if (receivedAmount < totalInPaymentCurrency) {
       throw new AppError(Messages.INSUFFICIENT_PAYMENT, HttpStatus.BAD_REQUEST)
@@ -150,6 +167,20 @@ export const orderService = {
 
     // ── 6. Atomic transaction: Order + Items + Options + Inventory ────
     const order = await prisma.$transaction(async tx => {
+      // Re-verify the applied promotion still exists and is active inside the tx.
+      // If it was deleted/deactivated between the read above and now, keep the
+      // already-quoted discount (the customer was charged netTotal) but drop the
+      // promotion linkage + counter, so a vanished promotion can't roll back an
+      // otherwise-valid paid sale (fail-open).
+      let effectivePromotionId = appliedPromotionId
+      if (appliedPromotionId) {
+        const stillActive = await tx.promotion.findFirst({
+          where: { id: appliedPromotionId, shopId, isActive: true },
+          select: { id: true },
+        })
+        effectivePromotionId = stillActive ? appliedPromotionId : null
+      }
+
       // Create the Order
       const createdOrder = await tx.order.create({
         data: {
@@ -157,8 +188,11 @@ export const orderService = {
           userId,
           orderNumber,
           orderType,
-          totalAmount: serverTotal,
-          discountAmount: 0,
+          // totalAmount holds the net (discounted) total that was actually charged;
+          // discountAmount records how much the promotion took off.
+          totalAmount: netTotal,
+          discountAmount,
+          promotionId: effectivePromotionId,
           receivedAmount,
           paymentCurrency,
           exchangeRateSnapshot,
@@ -167,6 +201,14 @@ export const orderService = {
           fulfillmentStatus,
         },
       })
+
+      // Record the redemption on the applied promotion (powers the dashboard metric).
+      if (effectivePromotionId) {
+        await tx.promotion.update({
+          where: { id: effectivePromotionId },
+          data: { timesRedeemed: { increment: 1 } },
+        })
+      }
 
       // Create OrderItems + OrderItemOptions using fully validated server-canonical data
       for (const valItem of validatedItemsList) {
@@ -200,7 +242,10 @@ export const orderService = {
     return {
       id: order.id,
       orderNumber: order.orderNumber,
-      totalAmount: serverTotal,
+      subtotal: serverTotal,
+      discountAmount,
+      promotionId: appliedPromotionId,
+      totalAmount: netTotal,
       receivedAmount,
       paymentCurrency,
       changeAmount,

@@ -10,6 +10,7 @@ const promotionSelect = {
   discountType: true,
   discountValue: true,
   scope: true,
+  timesRedeemed: true,
   isActive: true,
   startDate: true,
   endDate: true,
@@ -27,6 +28,7 @@ const toDto = (promotion: PromotionWithScope) => ({
   discountType: promotion.discountType,
   discountValue: Number(promotion.discountValue),
   scope: promotion.scope,
+  timesRedeemed: promotion.timesRedeemed,
   isActive: promotion.isActive,
   startDate: promotion.startDate,
   endDate: promotion.endDate,
@@ -91,7 +93,7 @@ export const promotionService = {
 
     const now = new Date()
 
-    const [promotions, total, activePromotions, upcomingOffers, totalRedeemed] = await Promise.all([
+    const [promotions, total, activePromotions, upcomingOffers, redeemedAgg] = await Promise.all([
       prisma.promotion.findMany({
         where,
         select: promotionSelect,
@@ -102,7 +104,9 @@ export const promotionService = {
       prisma.promotion.count({ where }),
       prisma.promotion.count({ where: { shopId, isActive: true } }),
       prisma.promotion.count({ where: { shopId, startDate: { gt: now } } }),
-      prisma.order.count({ where: { shopId, promotionId: { not: null } } }),
+      // Total redemptions across the shop, from the per-promotion counter that
+      // checkout increments (see orderService).
+      prisma.promotion.aggregate({ where: { shopId }, _sum: { timesRedeemed: true } }),
     ])
 
     return {
@@ -115,10 +119,32 @@ export const promotionService = {
       },
       summary: {
         activePromotions,
-        totalRedeemed,
+        totalRedeemed: redeemedAgg._sum.timesRedeemed ?? 0,
         upcomingOffers,
       },
     }
+  },
+
+  /**
+   * Active promotions the POS cart can apply right now: enabled and within their
+   * (optional) date window. Available to cashiers, so it is shop-scoped only.
+   */
+  async getActiveByShop(shopId: number) {
+    assertShop(shopId)
+    const now = new Date()
+    const promotions = await prisma.promotion.findMany({
+      where: {
+        shopId,
+        isActive: true,
+        AND: [
+          { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: now } }] },
+        ],
+      },
+      select: promotionSelect,
+      orderBy: { createdAt: 'desc' },
+    })
+    return promotions.map(toDto)
   },
 
   async getById(shopId: number, id: number) {

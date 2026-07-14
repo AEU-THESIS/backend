@@ -255,6 +255,7 @@ model Promotion {
   discountType  String    @map("discount_type") // PERCENTAGE | FIXED_AMOUNT | BOGO
   discountValue Decimal   @default(0.00) @map("discount_value") @db.Decimal(10, 2)
   scope         String    @default("ALL") // ALL | SPECIFIC
+  timesRedeemed Int       @default(0) @map("times_redeemed")
   isActive      Boolean   @default(false) @map("is_active")
   startDate     DateTime? @map("start_date")
   endDate       DateTime? @map("end_date")

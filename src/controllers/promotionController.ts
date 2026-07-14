@@ -22,6 +22,13 @@ export const promotionController = {
     return sendSuccess(res, result)
   }),
 
+  // Active promotions for the POS cart (available to cashiers).
+  getActive: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const promotions = await promotionService.getActiveByShop(shopId)
+    return sendSuccess(res, promotions)
+  }),
+
   getOne: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
     const { id } = idParamSchema.parse(req.params)
