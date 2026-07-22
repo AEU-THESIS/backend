@@ -4,11 +4,12 @@ import { z } from 'zod'
 export const DISCOUNT_TYPES = ['PERCENTAGE', 'FIXED_AMOUNT', 'BOGO'] as const
 export const PROMOTION_SCOPES = ['ALL', 'SPECIFIC'] as const
 
-// Accepts an ISO date string (or null) and coerces to a Date.
+// Accepts an ISO datetime or a `YYYY-MM-DD` date string and coerces to a Date.
+// Rejects anything that doesn't parse to a real calendar date (e.g. "9999-99-99")
+// so a clean 400 is returned instead of an Invalid Date reaching Prisma (500).
 const optionalDate = z
   .string()
-  .datetime({ offset: true })
-  .or(z.string().regex(/^\d{4}-\d{2}-\d{2}/))
+  .refine(value => !Number.isNaN(new Date(value).getTime()), { message: 'Invalid date' })
   .transform(value => new Date(value))
   .optional()
   .nullable()

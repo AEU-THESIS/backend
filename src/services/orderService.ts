@@ -149,7 +149,8 @@ export const orderService = {
     const primaryPromotionId = applied.length
       ? applied.reduce((a, b) => (b.discount > a.discount ? b : a)).promotion.id
       : null
-    const netTotal = Math.round((serverTotal - discountAmount) * 100) / 100
+    // Never let stacked/fixed-amount discounts push the charge below zero.
+    const netTotal = Math.max(0, Math.round((serverTotal - discountAmount) * 100) / 100)
 
     // ── 3. Validate received amount is sufficient (against the net total) ─
     const totalInPaymentCurrency =
@@ -266,7 +267,9 @@ export const orderService = {
       orderNumber: order.orderNumber,
       subtotal: serverTotal,
       discountAmount,
-      promotionId: primaryPromotionId,
+      // Reflect what was actually persisted (fail-open may have nulled it in-tx),
+      // not the pre-transaction candidate.
+      promotionId: order.promotionId,
       totalAmount: netTotal,
       receivedAmount,
       paymentCurrency,

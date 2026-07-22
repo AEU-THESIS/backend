@@ -1,6 +1,7 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { Prisma } from '@prisma/client'
 import type { CreatePromotionInput, UpdatePromotionInput } from '../validations/promotionValidation'
+import { shopDateString, shopDayStartUtc, shopDayEndUtc } from '../utils/date'
 
 // Fields returned to the client. Scope relations are flattened to id arrays.
 const promotionSelect = {
@@ -132,13 +133,14 @@ export const promotionService = {
       where.OR = [{ name: { contains: search } }, { code: { contains: search } }]
     }
 
-    // Calendar-day boundaries (promotions carry date-only start/end). "Active" means
-    // enabled AND within its window right now — matching what actually applies on the
-    // POS — so an enabled-but-expired promo is not counted as active.
-    const startOfToday = new Date()
-    startOfToday.setHours(0, 0, 0, 0)
-    const endOfToday = new Date()
-    endOfToday.setHours(23, 59, 59, 999)
+    // Calendar-day boundaries in the café's timezone (promotions carry date-only
+    // start/end). "Active" means enabled AND within its window right now — matching
+    // what actually applies on the POS — so an enabled-but-expired promo is not
+    // counted as active. Uses the shop-local day so it stays consistent with checkout
+    // across the UTC+7 day boundary.
+    const today = shopDateString(0)
+    const startOfToday = shopDayStartUtc(today)
+    const endOfToday = shopDayEndUtc(today)
 
     const [promotions, total, activePromotions, upcomingOffers, redeemedAgg] = await Promise.all([
       prisma.promotion.findMany({
@@ -190,12 +192,12 @@ export const promotionService = {
     assertShop(shopId)
     // start/end dates come from a date picker (date-only, stored at midnight), so a
     // promotion is live through the END of its end date and from the START of its
-    // start date. Compare against calendar-day boundaries — not the current instant —
-    // otherwise a promo ending "today" would be treated as expired after midnight.
-    const startOfToday = new Date()
-    startOfToday.setHours(0, 0, 0, 0)
-    const endOfToday = new Date()
-    endOfToday.setHours(23, 59, 59, 999)
+    // start date. Compare against the café's calendar-day boundaries — not the current
+    // instant or the server timezone — so this matches what checkout applies across
+    // the UTC+7 day boundary; otherwise a promo ending "today" would look expired.
+    const today = shopDateString(0)
+    const startOfToday = shopDayStartUtc(today)
+    const endOfToday = shopDayEndUtc(today)
     const promotions = await prisma.promotion.findMany({
       where: {
         shopId,

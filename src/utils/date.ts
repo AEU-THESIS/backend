@@ -5,7 +5,10 @@
  * DST, so a constant offset is both correct and dependency-free. Overridable
  * via env for other deployments.
  */
-const SHOP_UTC_OFFSET_MINUTES = Number(process.env.SHOP_UTC_OFFSET_MINUTES) || 420 // UTC+7
+// Use the configured offset when it's a valid number (including 0 for UTC);
+// only fall back to UTC+7 when it's unset or non-numeric.
+const configuredOffset = Number(process.env.SHOP_UTC_OFFSET_MINUTES)
+const SHOP_UTC_OFFSET_MINUTES = Number.isFinite(configuredOffset) ? configuredOffset : 420 // UTC+7
 
 /**
  * Returns the UTC instant at the *start* (00:00:00.000) of the given local
