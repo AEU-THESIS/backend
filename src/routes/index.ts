@@ -9,6 +9,7 @@ import categoryRoutes from './categoryRoutes'
 import productRoutes from './productRoutes'
 import orderRoutes from './orderRoutes'
 import reportRoutes from './reportRoutes'
+import promotionRoutes from './promotionRoutes'
 
 const router = Router()
 
@@ -23,5 +24,6 @@ router.use('/categories', categoryRoutes)
 router.use('/products', productRoutes)
 router.use('/orders', orderRoutes)
 router.use('/reports', reportRoutes)
+router.use('/promotions', promotionRoutes)
 
 export default router

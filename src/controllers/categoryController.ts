@@ -28,7 +28,13 @@ export const categoryController = {
     const shopId = req.user!.shop_id
     const categoryId = Number(req.params.id)
 
-    if (!/^\d$/.test(req.params.id) || !Number.isSafeInteger(categoryId) || categoryId <= 0) {
+    const id = req.params.id
+    if (
+      typeof id !== 'string' ||
+      !/^\d+$/.test(id) ||
+      !Number.isSafeInteger(categoryId) ||
+      categoryId <= 0
+    ) {
       throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
 

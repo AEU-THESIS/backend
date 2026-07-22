@@ -1,6 +1,9 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { CreateOrderInput } from '../validations/orderValidation'
 import { Prisma } from '@prisma/client'
+import { promotionService } from './promotionService'
+import { cartDiscounts, type CartLineForCalc } from '../utils/promotionDiscount'
+import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
 
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
@@ -126,9 +129,32 @@ export const orderService = {
     }
     serverTotal = Math.round(serverTotal * 100) / 100
 
-    // ── 3. Validate received amount is sufficient ─────────────────────
+    // ── 2b. Server-side promotion application ─────────────────────────
+    // Independently fetch the shop's active promotions and recompute the discount
+    // here — never trust a client-supplied discount. At most one promotion applies
+    // (the largest-discount match). serverTotal is the pre-discount subtotal.
+    const cartLines: CartLineForCalc[] = validatedItemsList.map(v => ({
+      productId: v.productId,
+      categoryId: productMap.get(v.productId)!.categoryId,
+      quantity: v.quantity,
+      unitPrice: v.basePrice + v.optionsExtra,
+      subtotal: v.subtotal,
+    }))
+    const activePromotions = await promotionService.getActiveByShop(shopId)
+    const { total: discountAmount, applied } = cartDiscounts(activePromotions, cartLines)
+    const appliedPromotionIds = applied.map(a => a.promotion.id)
+    // The single largest-contributing promotion is recorded on the order (the schema
+    // links one promotion per order); every applied promotion still has its
+    // times_redeemed incremented below.
+    const primaryPromotionId = applied.length
+      ? applied.reduce((a, b) => (b.discount > a.discount ? b : a)).promotion.id
+      : null
+    // Never let stacked/fixed-amount discounts push the charge below zero.
+    const netTotal = Math.max(0, Math.round((serverTotal - discountAmount) * 100) / 100)
+
+    // ── 3. Validate received amount is sufficient (against the net total) ─
     const totalInPaymentCurrency =
-      paymentCurrency === 'KHR' ? Math.ceil(serverTotal * exchangeRateSnapshot) : serverTotal
+      paymentCurrency === 'KHR' ? Math.ceil(netTotal * exchangeRateSnapshot) : netTotal
 
     if (receivedAmount < totalInPaymentCurrency) {
       throw new AppError(Messages.INSUFFICIENT_PAYMENT, HttpStatus.BAD_REQUEST)
@@ -150,6 +176,24 @@ export const orderService = {
 
     // ── 6. Atomic transaction: Order + Items + Options + Inventory ────
     const order = await prisma.$transaction(async tx => {
+      // Re-verify the applied promotions still exist and are active inside the tx.
+      // If one was deleted/deactivated between the read above and now, keep the
+      // already-quoted discount (the customer was charged netTotal) but only record
+      // and redeem the ones that survive, so a vanished promotion can't roll back an
+      // otherwise-valid paid sale (fail-open).
+      let activeAppliedIds: number[] = []
+      if (appliedPromotionIds.length > 0) {
+        const stillActive = await tx.promotion.findMany({
+          where: { id: { in: appliedPromotionIds }, shopId, isActive: true },
+          select: { id: true },
+        })
+        activeAppliedIds = stillActive.map(p => p.id)
+      }
+      const effectivePromotionId =
+        primaryPromotionId && activeAppliedIds.includes(primaryPromotionId)
+          ? primaryPromotionId
+          : (activeAppliedIds[0] ?? null)
+
       // Create the Order
       const createdOrder = await tx.order.create({
         data: {
@@ -157,8 +201,11 @@ export const orderService = {
           userId,
           orderNumber,
           orderType,
-          totalAmount: serverTotal,
-          discountAmount: 0,
+          // totalAmount holds the net (discounted) total that was actually charged;
+          // discountAmount records how much the promotion took off.
+          totalAmount: netTotal,
+          discountAmount,
+          promotionId: effectivePromotionId,
           receivedAmount,
           paymentCurrency,
           exchangeRateSnapshot,
@@ -167,6 +214,24 @@ export const orderService = {
           fulfillmentStatus,
         },
       })
+
+      // Record a redemption on every applied promotion (powers the dashboard metric)
+      // and persist a per-promotion discount breakdown so order history can show it.
+      if (activeAppliedIds.length > 0) {
+        await tx.promotion.updateMany({
+          where: { id: { in: activeAppliedIds } },
+          data: { timesRedeemed: { increment: 1 } },
+        })
+        await tx.orderPromotion.createMany({
+          data: applied
+            .filter(a => activeAppliedIds.includes(a.promotion.id))
+            .map(a => ({
+              orderId: createdOrder.id,
+              promotionId: a.promotion.id,
+              discountAmount: a.discount,
+            })),
+        })
+      }
 
       // Create OrderItems + OrderItemOptions using fully validated server-canonical data
       for (const valItem of validatedItemsList) {
@@ -200,7 +265,12 @@ export const orderService = {
     return {
       id: order.id,
       orderNumber: order.orderNumber,
-      totalAmount: serverTotal,
+      subtotal: serverTotal,
+      discountAmount,
+      // Reflect what was actually persisted (fail-open may have nulled it in-tx),
+      // not the pre-transaction candidate.
+      promotionId: order.promotionId,
+      totalAmount: netTotal,
       receivedAmount,
       paymentCurrency,
       changeAmount,
@@ -268,26 +338,24 @@ export const orderService = {
       whereClause.paymentStatus = paymentStatus
     }
 
-    // Date filters
-    if (date === 'today') {
-      const startOfDay = new Date()
-      startOfDay.setHours(0, 0, 0, 0)
-      const endOfDay = new Date()
-      endOfDay.setHours(23, 59, 59, 999)
+    // Date filters. createdAt is stored in UTC, so day windows are computed
+    // against the café's local calendar day (see utils/date helpers) — never
+    // the server's timezone. This keeps same-day orders (e.g. one placed just
+    // after local midnight) inside the "today" window.
+    if (date === 'today' || date === 'yesterday') {
+      const day = date === 'today' ? shopDateString(0) : shopDateString(-1)
       whereClause.createdAt = {
-        gte: startOfDay,
-        lte: endOfDay,
+        gte: shopDayStartUtc(day),
+        lte: shopDayEndUtc(day),
       }
     } else if (startDate || endDate) {
       whereClause.createdAt = {}
       if (startDate) {
-        whereClause.createdAt.gte = new Date(startDate)
+        whereClause.createdAt.gte = shopDayStartUtc(startDate)
       }
       if (endDate) {
-        const end = new Date(endDate)
-        // Make sure it goes until the end of the endDate day
-        end.setHours(23, 59, 59, 999)
-        whereClause.createdAt.lte = end
+        // Include the entire local endDate day.
+        whereClause.createdAt.lte = shopDayEndUtc(endDate)
       }
     }
 
@@ -324,6 +392,16 @@ export const orderService = {
               options: true,
             },
           },
+          promotion: {
+            select: { id: true, name: true, code: true, discountType: true, discountValue: true },
+          },
+          appliedPromotions: {
+            select: {
+              promotionId: true,
+              discountAmount: true,
+              promotion: { select: { id: true, name: true, code: true, discountType: true } },
+            },
+          },
         },
       }),
     ])
@@ -350,6 +428,16 @@ export const orderService = {
           include: {
             product: true,
             options: true,
+          },
+        },
+        promotion: {
+          select: { id: true, name: true, code: true, discountType: true, discountValue: true },
+        },
+        appliedPromotions: {
+          select: {
+            promotionId: true,
+            discountAmount: true,
+            promotion: { select: { id: true, name: true, code: true, discountType: true } },
           },
         },
       },

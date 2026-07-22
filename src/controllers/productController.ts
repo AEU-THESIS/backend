@@ -13,6 +13,7 @@ import {
   UpdateProductSchema,
   CreateProductSchema,
 } from '../validations/productValidation'
+import { idParamSchema } from '../validations/commonValidation'
 import { AppError } from '../utils/appError'
 
 export const productController = {
@@ -37,11 +38,7 @@ export const productController = {
 
   getById: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-
-    if (!/^\d+$/.test(req.params.id)) {
-      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
-    }
-    const productId = Number(req.params.id)
+    const { id: productId } = idParamSchema.parse(req.params)
 
     const product = await productService.getById(productId, shopId)
     return sendSuccess(res, product, Messages.SUCCESS, HttpStatus.OK)
@@ -49,11 +46,7 @@ export const productController = {
 
   update: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const productId = parseInt(req.params.id, 10)
-
-    if (isNaN(productId)) {
-      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
-    }
+    const { id: productId } = idParamSchema.parse(req.params)
 
     const parsed = UpdateProductSchema.safeParse(req.body)
 
