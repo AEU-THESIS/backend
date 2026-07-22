@@ -1,14 +1,6 @@
-import {
-  Request,
-  Response,
-  catchAsync,
-  sendSuccess,
-  HttpStatus,
-  Messages,
-} from '../core/Controller'
+import { Request, Response, catchAsync, sendSuccess } from '../core/Controller'
 import { reportService } from '../services/reportService'
-import { ReportPeriodSchema } from '../validations/reportValidation'
-import { AppError } from '../utils/appError'
+import { ReportPeriodSchema, DailySummaryQuerySchema } from '../validations/reportValidation'
 
 export const reportController = {
   getOverview: catchAsync(async (req: Request, res: Response) => {
@@ -55,13 +47,9 @@ export const reportController = {
   }),
   getReportToday: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const { date } = req.query
+    const { date } = DailySummaryQuerySchema.parse(req.query)
 
-    if (date !== undefined && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
-      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
-    }
-
-    const summary = await reportService.getDailySummary(shopId, date as string | undefined)
+    const summary = await reportService.getDailySummary(shopId, date)
     return sendSuccess(res, summary)
   }),
 }
