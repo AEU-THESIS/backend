@@ -77,6 +77,47 @@ const validateScopeOwnership = async (
   return { uniqueCategoryIds, uniqueProductIds }
 }
 
+/**
+ * Ensures none of the given categories/products are already targeted by another
+ * promotion in the same shop. An item may belong to at most one promotion at a
+ * time — the manager must remove it from the other promotion (or deselect it)
+ * before reusing it. `excludePromotionId` skips the promotion being edited.
+ */
+const assertNoScopeConflicts = async (
+  tx: Prisma.TransactionClient,
+  shopId: number,
+  categoryIds: number[],
+  productIds: number[],
+  excludePromotionId?: number
+) => {
+  const uniqueCategoryIds = [...new Set(categoryIds)]
+  const uniqueProductIds = [...new Set(productIds)]
+
+  const promotionFilter = excludePromotionId
+    ? { shopId, id: { not: excludePromotionId } }
+    : { shopId }
+
+  if (uniqueProductIds.length > 0) {
+    const clash = await tx.promotionProduct.findFirst({
+      where: { productId: { in: uniqueProductIds }, promotion: promotionFilter },
+      select: { productId: true },
+    })
+    if (clash) {
+      throw new AppError(Messages.PROMOTION_ITEM_CONFLICT, HttpStatus.CONFLICT)
+    }
+  }
+
+  if (uniqueCategoryIds.length > 0) {
+    const clash = await tx.promotionCategory.findFirst({
+      where: { categoryId: { in: uniqueCategoryIds }, promotion: promotionFilter },
+      select: { categoryId: true },
+    })
+    if (clash) {
+      throw new AppError(Messages.PROMOTION_ITEM_CONFLICT, HttpStatus.CONFLICT)
+    }
+  }
+}
+
 export const promotionService = {
   /**
    * Paginated list of a shop's promotions plus the dashboard summary cards
@@ -91,7 +132,13 @@ export const promotionService = {
       where.OR = [{ name: { contains: search } }, { code: { contains: search } }]
     }
 
-    const now = new Date()
+    // Calendar-day boundaries (promotions carry date-only start/end). "Active" means
+    // enabled AND within its window right now — matching what actually applies on the
+    // POS — so an enabled-but-expired promo is not counted as active.
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 59, 999)
 
     const [promotions, total, activePromotions, upcomingOffers, redeemedAgg] = await Promise.all([
       prisma.promotion.findMany({
@@ -102,8 +149,18 @@ export const promotionService = {
         take: limit,
       }),
       prisma.promotion.count({ where }),
-      prisma.promotion.count({ where: { shopId, isActive: true } }),
-      prisma.promotion.count({ where: { shopId, startDate: { gt: now } } }),
+      prisma.promotion.count({
+        where: {
+          shopId,
+          isActive: true,
+          AND: [
+            { OR: [{ startDate: null }, { startDate: { lte: endOfToday } }] },
+            { OR: [{ endDate: null }, { endDate: { gte: startOfToday } }] },
+          ],
+        },
+      }),
+      // Enabled promotions scheduled to start after today.
+      prisma.promotion.count({ where: { shopId, isActive: true, startDate: { gt: endOfToday } } }),
       // Total redemptions across the shop, from the per-promotion counter that
       // checkout increments (see orderService).
       prisma.promotion.aggregate({ where: { shopId }, _sum: { timesRedeemed: true } }),
@@ -131,14 +188,21 @@ export const promotionService = {
    */
   async getActiveByShop(shopId: number) {
     assertShop(shopId)
-    const now = new Date()
+    // start/end dates come from a date picker (date-only, stored at midnight), so a
+    // promotion is live through the END of its end date and from the START of its
+    // start date. Compare against calendar-day boundaries — not the current instant —
+    // otherwise a promo ending "today" would be treated as expired after midnight.
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 59, 999)
     const promotions = await prisma.promotion.findMany({
       where: {
         shopId,
         isActive: true,
         AND: [
-          { OR: [{ startDate: null }, { startDate: { lte: now } }] },
-          { OR: [{ endDate: null }, { endDate: { gte: now } }] },
+          { OR: [{ startDate: null }, { startDate: { lte: endOfToday } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: startOfToday } }] },
         ],
       },
       select: promotionSelect,
@@ -176,6 +240,7 @@ export const promotionService = {
         categoryIds,
         productIds
       )
+      await assertNoScopeConflicts(tx, shopId, uniqueCategoryIds, uniqueProductIds)
 
       const created = await tx.promotion.create({
         data: {
@@ -268,6 +333,7 @@ export const promotionService = {
         // Replace category scope only when the caller sent the array.
         if (input.categoryIds !== undefined) {
           await validateScopeOwnership(tx, shopId, input.categoryIds, [])
+          await assertNoScopeConflicts(tx, shopId, input.categoryIds, [], id)
           await tx.promotionCategory.deleteMany({ where: { promotionId: id } })
           if (input.categoryIds.length > 0) {
             await tx.promotionCategory.createMany({
@@ -280,6 +346,7 @@ export const promotionService = {
         }
         if (input.productIds !== undefined) {
           await validateScopeOwnership(tx, shopId, [], input.productIds)
+          await assertNoScopeConflicts(tx, shopId, [], input.productIds, id)
           await tx.promotionProduct.deleteMany({ where: { promotionId: id } })
           if (input.productIds.length > 0) {
             await tx.promotionProduct.createMany({
@@ -323,8 +390,11 @@ export const promotionService = {
       throw new AppError(Messages.PROMOTION_NOT_FOUND, HttpStatus.NOT_FOUND)
     }
 
-    const usedByOrders = await prisma.order.count({ where: { promotionId: id } })
-    if (usedByOrders > 0) {
+    const [usedByOrders, usedInBreakdown] = await Promise.all([
+      prisma.order.count({ where: { promotionId: id } }),
+      prisma.orderPromotion.count({ where: { promotionId: id } }),
+    ])
+    if (usedByOrders > 0 || usedInBreakdown > 0) {
       throw new AppError(Messages.PROMOTION_IN_USE, HttpStatus.CONFLICT)
     }
 

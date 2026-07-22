@@ -147,47 +147,6 @@
  *                 message:
  *                   type: string
  *                   example: Received amount is insufficient for the total
- *
- * /api/orders/stream:
- *   get:
- *     tags:
- *       - Order
- *     summary: Subscribe to real-time order update events (SSE)
- *     description: Subscribes the client to a Server-Sent Events (SSE) stream to receive real-time notifications about order creation and status changes. Authenticates via JWT passed in the query string (`token`).
- *     parameters:
- *       - in: query
- *         name: token
- *         required: true
- *         schema:
- *           type: string
- *         description: JWT authentication token required to establish connection
- *     responses:
- *       200:
- *         description: Connection established successfully. Returns event stream.
- *         headers:
- *           Content-Type:
- *             schema:
- *               type: string
- *               example: text/event-stream
- *           Cache-Control:
- *             schema:
- *               type: string
- *               example: no-cache, no-transform
- *           Connection:
- *             schema:
- *               type: string
- *               example: keep-alive
- *         content:
- *           text/event-stream:
- *             schema:
- *               type: string
- *               example: "data: {\"status\":\"connected\",\"shopId\":1}\n\n"
- *       400:
- *         description: Shop ID required or validation failed
- *       401:
- *         description: Unauthorized
- *
- * /api/orders:
  *   get:
  *     tags:
  *       - Order
@@ -297,6 +256,45 @@
  *                           example: 1
  *       400:
  *         description: Invalid query parameters
+ *       401:
+ *         description: Unauthorized
+ *
+ * /api/orders/stream:
+ *   get:
+ *     tags:
+ *       - Order
+ *     summary: Subscribe to real-time order update events (SSE)
+ *     description: Subscribes the client to a Server-Sent Events (SSE) stream to receive real-time notifications about order creation and status changes. Authenticates via JWT passed in the query string (`token`).
+ *     parameters:
+ *       - in: query
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: JWT authentication token required to establish connection
+ *     responses:
+ *       200:
+ *         description: Connection established successfully. Returns event stream.
+ *         headers:
+ *           Content-Type:
+ *             schema:
+ *               type: string
+ *               example: text/event-stream
+ *           Cache-Control:
+ *             schema:
+ *               type: string
+ *               example: no-cache, no-transform
+ *           Connection:
+ *             schema:
+ *               type: string
+ *               example: keep-alive
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *               example: "data: {\"status\":\"connected\",\"shopId\":1}\n\n"
+ *       400:
+ *         description: Shop ID required or validation failed
  *       401:
  *         description: Unauthorized
  *

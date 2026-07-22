@@ -261,10 +261,11 @@ model Promotion {
   endDate       DateTime? @map("end_date")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  shop       Shop                @relation(fields: [shopId], references: [id])
-  orders     Order[]
-  categories PromotionCategory[]
-  products   PromotionProduct[]
+  shop            Shop                @relation(fields: [shopId], references: [id])
+  orders          Order[]
+  orderPromotions OrderPromotion[]
+  categories      PromotionCategory[]
+  products        PromotionProduct[]
 
   @@index([shopId])
   @@map("promotions")
@@ -436,14 +437,31 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop         Shop          @relation(fields: [shopId], references: [id])
-  user         User?         @relation(fields: [userId], references: [id])
-  tableSession TableSession? @relation(fields: [tableSessionId], references: [id])
-  promotion    Promotion?    @relation(fields: [promotionId], references: [id])
-  items        OrderItem[]
-  transactions Transaction[]
+  shop              Shop             @relation(fields: [shopId], references: [id])
+  user              User?            @relation(fields: [userId], references: [id])
+  tableSession      TableSession?    @relation(fields: [tableSessionId], references: [id])
+  promotion         Promotion?       @relation(fields: [promotionId], references: [id])
+  items             OrderItem[]
+  transactions      Transaction[]
+  appliedPromotions OrderPromotion[]
 
   @@map("orders")
+}
+
+// Pivot: every promotion applied to an order and how much it discounted. Promotions
+// stack (one per item), so an order can carry several; `discountAmount` on the order
+// is the sum, and `promotionId` records the single largest for quick reference.
+model OrderPromotion {
+  orderId        Int     @map("order_id")
+  promotionId    Int     @map("promotion_id")
+  discountAmount Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+
+  @@id([orderId, promotionId])
+  @@index([promotionId])
+  @@map("order_promotion")
 }
 
 model OrderItem {

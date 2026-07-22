@@ -38,10 +38,11 @@ export const productController = {
   getById: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
 
-    if (!/^\d+$/.test(req.params.id)) {
+    const id = req.params.id
+    if (typeof id !== 'string' || !/^\d+$/.test(id)) {
       throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
-    const productId = Number(req.params.id)
+    const productId = Number(id)
 
     const product = await productService.getById(productId, shopId)
     return sendSuccess(res, product, Messages.SUCCESS, HttpStatus.OK)
@@ -49,7 +50,7 @@ export const productController = {
 
   update: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const productId = parseInt(req.params.id, 10)
+    const productId = parseInt(String(req.params.id), 10)
 
     if (isNaN(productId)) {
       throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)

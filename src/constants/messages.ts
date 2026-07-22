@@ -56,4 +56,6 @@ export const Messages = {
   PROMOTION_INVALID_SCOPE_ITEMS:
     'One or more selected categories or products do not belong to this shop',
   PROMOTION_IN_USE: 'This promotion cannot be deleted because it has been used in orders',
+  PROMOTION_ITEM_CONFLICT:
+    'One or more selected items or categories already belong to another promotion. Remove them from the other promotion first.',
 } as const

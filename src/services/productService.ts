@@ -370,13 +370,13 @@ export const productService = {
       isAvailable: p.isAvailable,
       priceMode: p.priceMode,
       type: p.type,
-      optionSets: p.optionSets.map(pos => ({
+      optionSets: p.optionSets.map((pos: any) => ({
         isRequired: pos.isRequired,
         optionSet: {
           id: pos.optionSet.id,
           name: pos.optionSet.name,
           type: pos.optionSet.type,
-          elements: pos.optionSet.elements.map(el => ({
+          elements: pos.optionSet.elements.map((el: any) => ({
             id: el.id,
             label: el.label,
             priceModifier: Number(el.priceModifier),
