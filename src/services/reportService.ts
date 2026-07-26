@@ -1,5 +1,12 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
-import { getPeriodStartDate } from '../utils/date'
+import {
+  getPeriodStartDate,
+  getItemReportRange,
+  ItemReportPeriod,
+  getKpiRange,
+  KpiRange,
+  buildRangeBuckets,
+} from '../utils/date'
 
 export const reportService = {
   async getDailySummary(shopId: number, date?: string) {
@@ -55,6 +62,111 @@ export const reportService = {
       exchange_rate: Number(shop?.exchangeRate ?? 4100),
     }
   },
+  /**
+   * Headline KPIs for the analytics dashboard: net sales (USD), total paid
+   * orders, and active staff — with period-over-period trends for the first two.
+   */
+  async getKpiSummary(shopId: number, range: KpiRange, startDate?: string, endDate?: string) {
+    const { start, end, prevStart, prevEnd } = getKpiRange(range, startDate, endDate)
+
+    const salesFor = async (from: Date, to: Date) => {
+      const orders = await prisma.order.findMany({
+        where: { shopId, paymentStatus: 'paid', createdAt: { gte: from, lte: to } },
+        select: { totalAmount: true },
+      })
+      const netSales = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0)
+      return { netSales: Math.round(netSales * 100) / 100, totalOrders: orders.length }
+    }
+
+    const [current, previous, activeStaff] = await Promise.all([
+      salesFor(start, end),
+      salesFor(prevStart, prevEnd),
+      prisma.user.count({ where: { shopId, isActive: true, isDeleted: false } }),
+    ])
+
+    // Percentage change vs previous window; null when there is no baseline.
+    const trend = (curr: number, prev: number): number | null =>
+      prev === 0 ? null : Math.round(((curr - prev) / prev) * 1000) / 10
+
+    return {
+      netSales: current.netSales,
+      totalOrders: current.totalOrders,
+      activeStaff,
+      netSalesTrend: trend(current.netSales, previous.netSales),
+      totalOrdersTrend: trend(current.totalOrders, previous.totalOrders),
+    }
+  },
+
+  /**
+   * Returns either the top 5 best-selling or the bottom 5 lowest-selling
+   * products (by units sold) for the requested period, including their category.
+   * Only the requested `type` is computed and returned.
+   */
+  async getSellingItems(
+    shopId: number,
+    type: 'top' | 'bottom',
+    period: ItemReportPeriod,
+    month?: string,
+    startDate?: string,
+    endDate?: string
+  ) {
+    // An explicit [startDate, endDate] window (from the global filter) takes
+    // precedence over the preset period.
+    const { start, end } =
+      startDate && endDate
+        ? { start: new Date(startDate), end: new Date(endDate) }
+        : getItemReportRange(period, month)
+
+    const orderItems = await prisma.orderItem.findMany({
+      where: {
+        order: {
+          shopId,
+          createdAt: { gte: start, lte: end },
+          paymentStatus: 'paid',
+        },
+      },
+      include: {
+        product: {
+          select: {
+            name: true,
+            category: { select: { name: true } },
+          },
+        },
+      },
+    })
+
+    // Aggregate quantity/revenue per product in JS to stay database-dialect independent.
+    const aggregation: Record<
+      number,
+      { productId: number; name: string; category: string; quantity: number; revenue: number }
+    > = {}
+
+    orderItems.forEach(item => {
+      const pid = item.productId
+      if (!aggregation[pid]) {
+        aggregation[pid] = {
+          productId: pid,
+          name: item.product?.name || `Product #${pid}`,
+          category: item.product?.category?.name || 'Uncategorized',
+          quantity: 0,
+          revenue: 0,
+        }
+      }
+      aggregation[pid].quantity += item.quantity
+      aggregation[pid].revenue += Number(item.subtotal)
+    })
+
+    const productList = Object.values(aggregation).map(p => ({
+      ...p,
+      revenue: Math.round(p.revenue * 100) / 100,
+    }))
+
+    const items = productList
+      .sort((a, b) => (type === 'top' ? b.quantity - a.quantity : a.quantity - b.quantity))
+      .slice(0, 5)
+
+    return { items }
+  },
 
   async getSalesOverview(shopId: number, period: 'daily' | 'weekly' | 'monthly') {
     const startDate = getPeriodStartDate(period)
@@ -106,6 +218,113 @@ export const reportService = {
       averageOrderValueUSD: Math.round(averageOrderValueUSD * 100) / 100,
       averageOrderValueKHR: Math.round(averageOrderValueKHR * 100) / 100,
     }
+  },
+
+  /**
+   * Net-sales time series for the "Net Sales Overview" chart. Buckets paid
+   * orders (USD base, matching KPI net sales) into ordered `{ label, value }`
+   * points:
+   *  - weekly : the current week, Monday → Sunday (7 buckets)
+   *  - monthly: the current year, January → the current month
+   *  - yearly : the last 5 calendar years, oldest → current
+   */
+  async getSalesTrend(
+    shopId: number,
+    granularity: 'weekly' | 'monthly' | 'yearly',
+    startDate?: string,
+    endDate?: string
+  ) {
+    // Global-filter path: bucket an arbitrary [startDate, endDate] window
+    // adaptively (hourly → daily → weekly → monthly → yearly) instead of using
+    // the fixed weekly/monthly/yearly presets.
+    if (startDate && endDate) {
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      const { points, bucketIndex } = buildRangeBuckets(start, end)
+
+      const orders = await prisma.order.findMany({
+        where: { shopId, paymentStatus: 'paid', createdAt: { gte: start, lte: end } },
+        select: { totalAmount: true, createdAt: true },
+      })
+
+      orders.forEach(o => {
+        const idx = bucketIndex(o.createdAt)
+        if (idx >= 0 && idx < points.length) {
+          points[idx].value += Number(o.totalAmount)
+        }
+      })
+
+      points.forEach(p => {
+        p.value = Math.round(p.value * 100) / 100
+      })
+
+      return { granularity, points }
+    }
+
+    const now = new Date()
+    let start: Date
+    const points: { label: string; value: number }[] = []
+    let bucketIndex: (d: Date) => number
+
+    if (granularity === 'weekly') {
+      const monday = new Date(now)
+      const mondayOffset = (monday.getDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
+      monday.setDate(monday.getDate() - mondayOffset)
+      monday.setHours(0, 0, 0, 0)
+      start = monday
+      ;['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(label =>
+        points.push({ label, value: 0 })
+      )
+      bucketIndex = d => (d.getDay() + 6) % 7
+    } else if (granularity === 'monthly') {
+      start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0)
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ]
+      months.forEach(label => points.push({ label, value: 0 }))
+      bucketIndex = d => d.getMonth()
+    } else {
+      const startYear = now.getFullYear() - 4
+      start = new Date(startYear, 0, 1, 0, 0, 0, 0)
+      for (let y = startYear; y <= now.getFullYear(); y++) {
+        points.push({ label: String(y), value: 0 })
+      }
+      bucketIndex = d => d.getFullYear() - startYear
+    }
+
+    const orders = await prisma.order.findMany({
+      where: {
+        shopId,
+        paymentStatus: 'paid',
+        createdAt: { gte: start, lte: now },
+      },
+      select: { totalAmount: true, createdAt: true },
+    })
+
+    // Accumulate net sales into buckets in JS to stay database-dialect independent.
+    orders.forEach(o => {
+      const idx = bucketIndex(o.createdAt)
+      if (idx >= 0 && idx < points.length) {
+        points[idx].value += Number(o.totalAmount)
+      }
+    })
+
+    points.forEach(p => {
+      p.value = Math.round(p.value * 100) / 100
+    })
+
+    return { granularity, points }
   },
 
   async getItemPerformance(shopId: number, period: 'daily' | 'weekly' | 'monthly') {

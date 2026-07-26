@@ -10,6 +10,22 @@ datasource db {
 }
 
 // ==========================================
+// ENUMS
+// ==========================================
+enum ProductType {
+  drink
+  food
+}
+enum PriceMode {
+  fixed
+  by_size
+}
+enum OptionSetType {
+  size
+  custom
+}
+
+// ==========================================
 // CORE: SHOP
 // ==========================================
 model Shop {
@@ -155,25 +171,29 @@ model Category {
   id        Int      @id @default(autoincrement())
   shopId    Int      @map("shop_id")
   name      String
+  isActive  Boolean  @default(true) @map("is_active")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
 
-  shop     Shop      @relation(fields: [shopId], references: [id])
-  products Product[]
+  shop       Shop                @relation(fields: [shopId], references: [id])
+  products   Product[]
+  promotions PromotionCategory[]
 
   @@map("categories")
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  shopId      Int      @map("shop_id")
-  categoryId  Int      @map("category_id")
+  id          Int         @id @default(autoincrement())
+  shopId      Int         @map("shop_id")
+  categoryId  Int         @map("category_id")
   name        String
-  price       Decimal  @db.Decimal(10, 2)
-  imageUrl    String?  @map("image_url") @db.LongText
-  isAvailable Boolean  @default(true) @map("is_available")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  price       Decimal?    @db.Decimal(10, 2)
+  imageUrl    String?     @map("image_url") @db.LongText
+  isAvailable Boolean     @default(true) @map("is_available")
+  type        ProductType @default(drink) @map("type")
+  priceMode   PriceMode   @default(fixed) @map("price_mode")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
   shop       Shop               @relation(fields: [shopId], references: [id])
   category   Category           @relation(fields: [categoryId], references: [id])
@@ -181,6 +201,7 @@ model Product {
   recipes    ProductRecipe[]
   cartItems  CartItem[]
   orderItems OrderItem[]
+  promotions PromotionProduct[]
 
   @@map("products")
 }
@@ -189,6 +210,7 @@ model OptionSet {
   id        Int      @id @default(autoincrement())
   shopId    Int      @map("shop_id")
   name      String
+  type      OptionSetType @map("type")
   createdAt DateTime @default(now()) @map("created_at")
 
   shop     Shop               @relation(fields: [shopId], references: [id])
@@ -205,7 +227,7 @@ model OptionSetElement {
   priceModifier Decimal @default(0.00) @map("price_modifier") @db.Decimal(10, 2)
   position      Int     @default(0)
 
-  optionSet OptionSet @relation(fields: [optionSetId], references: [id])
+  optionSet OptionSet @relation(fields: [optionSetId], references: [id], onDelete: Cascade)
 
   @@map("option_set_elements")
 }
@@ -216,8 +238,8 @@ model ProductOptionSet {
   optionSetId Int     @map("option_set_id")
   isRequired  Boolean @default(false) @map("is_required")
 
-  product   Product   @relation(fields: [productId], references: [id])
-  optionSet OptionSet @relation(fields: [optionSetId], references: [id])
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionSet OptionSet @relation(fields: [optionSetId], references: [id], onDelete: Cascade)
 
   @@map("product_option_sets")
 }
@@ -229,17 +251,50 @@ model Promotion {
   id            Int       @id @default(autoincrement())
   shopId        Int       @map("shop_id")
   name          String
-  discountType  String    @map("discount_type")
-  discountValue Decimal   @map("discount_value") @db.Decimal(10, 2)
+  code          String?
+  discountType  String    @map("discount_type") // PERCENTAGE | FIXED_AMOUNT | BOGO
+  discountValue Decimal   @default(0.00) @map("discount_value") @db.Decimal(10, 2)
+  scope         String    @default("ALL") // ALL | SPECIFIC
+  timesRedeemed Int       @default(0) @map("times_redeemed")
   isActive      Boolean   @default(false) @map("is_active")
   startDate     DateTime? @map("start_date")
   endDate       DateTime? @map("end_date")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  shop   Shop    @relation(fields: [shopId], references: [id])
-  orders Order[]
+  shop            Shop                @relation(fields: [shopId], references: [id])
+  orders          Order[]
+  orderPromotions OrderPromotion[]
+  categories      PromotionCategory[]
+  products        PromotionProduct[]
 
+  @@index([shopId])
   @@map("promotions")
+}
+
+// Pivot: promotions scoped to specific categories
+model PromotionCategory {
+  promotionId Int @map("promotion_id")
+  categoryId  Int @map("category_id")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, categoryId])
+  @@index([categoryId])
+  @@map("promotion_category")
+}
+
+// Pivot: promotions scoped to specific products
+model PromotionProduct {
+  promotionId Int @map("promotion_id")
+  productId   Int @map("product_id")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, productId])
+  @@index([productId])
+  @@map("promotion_product")
 }
 
 // ==========================================
@@ -382,14 +437,31 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop         Shop          @relation(fields: [shopId], references: [id])
-  user         User?         @relation(fields: [userId], references: [id])
-  tableSession TableSession? @relation(fields: [tableSessionId], references: [id])
-  promotion    Promotion?    @relation(fields: [promotionId], references: [id])
-  items        OrderItem[]
-  transactions Transaction[]
+  shop              Shop             @relation(fields: [shopId], references: [id])
+  user              User?            @relation(fields: [userId], references: [id])
+  tableSession      TableSession?    @relation(fields: [tableSessionId], references: [id])
+  promotion         Promotion?       @relation(fields: [promotionId], references: [id])
+  items             OrderItem[]
+  transactions      Transaction[]
+  appliedPromotions OrderPromotion[]
 
   @@map("orders")
+}
+
+// Pivot: every promotion applied to an order and how much it discounted. Promotions
+// stack (one per item), so an order can carry several; `discountAmount` on the order
+// is the sum, and `promotionId` records the single largest for quick reference.
+model OrderPromotion {
+  orderId        Int     @map("order_id")
+  promotionId    Int     @map("promotion_id")
+  discountAmount Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+
+  @@id([orderId, promotionId])
+  @@index([promotionId])
+  @@map("order_promotion")
 }
 
 model OrderItem {

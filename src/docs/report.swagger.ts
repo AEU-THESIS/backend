@@ -58,6 +58,59 @@
  *       403:
  *         description: Forbidden (Requires Admin privileges)
  *
+ * /api/reports/sales-trend:
+ *   get:
+ *     tags:
+ *       - Reports
+ *     summary: Retrieve net-sales time series for the overview chart
+ *     description: Returns an ordered list of net-sales (USD) data points bucketed by the selected granularity — weekly (current week, Mon→Sun), monthly (current year, Jan→current month), or yearly (last 5 years).
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: granularity
+ *         schema:
+ *           type: string
+ *           enum: [weekly, monthly, yearly]
+ *           default: weekly
+ *         required: false
+ *         description: The bucketing granularity for the sales trend.
+ *     responses:
+ *       200:
+ *         description: Sales trend retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Operation successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     granularity:
+ *                       type: string
+ *                       example: "weekly"
+ *                     points:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           label:
+ *                             type: string
+ *                             example: "Mon"
+ *                           value:
+ *                             type: number
+ *                             example: 1420.5
+ *       401:
+ *         description: Unauthorized (Invalid or missing JWT)
+ *       403:
+ *         description: Forbidden (Requires Admin privileges)
+ *
  * /api/reports/item-performance:
  *   get:
  *     tags:

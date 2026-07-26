@@ -13,4 +13,20 @@ router.get(
   productController.getAll
 )
 
+router.post('/', authenticate, requireRoles([ROLES.ADMIN, ROLES.MANAGER]), productController.create)
+
+router.get(
+  '/:id',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
+  productController.getById
+)
+
+router.put(
+  '/:id',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  productController.update
+)
+
 export default router
