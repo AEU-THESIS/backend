@@ -393,13 +393,13 @@ export const orderService = {
             },
           },
           promotion: {
-            select: { id: true, name: true, code: true, discountType: true, discountValue: true },
+            select: { id: true, name: true, discountType: true, discountValue: true },
           },
           appliedPromotions: {
             select: {
               promotionId: true,
               discountAmount: true,
-              promotion: { select: { id: true, name: true, code: true, discountType: true } },
+              promotion: { select: { id: true, name: true, discountType: true } },
             },
           },
         },
@@ -431,13 +431,13 @@ export const orderService = {
           },
         },
         promotion: {
-          select: { id: true, name: true, code: true, discountType: true, discountValue: true },
+          select: { id: true, name: true, discountType: true, discountValue: true },
         },
         appliedPromotions: {
           select: {
             promotionId: true,
             discountAmount: true,
-            promotion: { select: { id: true, name: true, code: true, discountType: true } },
+            promotion: { select: { id: true, name: true, discountType: true } },
           },
         },
       },
