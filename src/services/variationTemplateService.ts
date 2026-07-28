@@ -5,8 +5,6 @@ import type {
   VariationTemplateQueryInput,
 } from '../validations/variationTemplateValidation'
 
-const db = prisma as any
-
 const includeOptions = {
   options: {
     orderBy: { displayOrder: 'asc' as const },
@@ -16,7 +14,7 @@ const includeOptions = {
 export const variationTemplateService = {
   async getByShop(shopId: number, filters: VariationTemplateQueryInput) {
     const search = filters.search?.trim()
-    const templates = await db.variationGroupTemplate.findMany({
+    const templates = await prisma.variationGroupTemplate.findMany({
       where: {
         shopId,
         ...(filters.includeArchived ? {} : { isActive: true }),
@@ -38,7 +36,7 @@ export const variationTemplateService = {
   },
 
   async getById(templateId: number, shopId: number) {
-    const template = await db.variationGroupTemplate.findFirst({
+    const template = await prisma.variationGroupTemplate.findFirst({
       where: { id: templateId, shopId },
       include: includeOptions,
     })
@@ -51,7 +49,7 @@ export const variationTemplateService = {
   },
 
   async create(shopId: number, userId: number, data: CreateVariationTemplateInput) {
-    const template = await db.variationGroupTemplate.create({
+    const template = await prisma.variationGroupTemplate.create({
       data: {
         shopId,
         createdBy: userId,
@@ -75,7 +73,7 @@ export const variationTemplateService = {
   async update(templateId: number, shopId: number, data: UpdateVariationTemplateInput) {
     await this.ensureTemplate(templateId, shopId)
 
-    const template = await db.$transaction(async (tx: any) => {
+    const template = await prisma.$transaction(async tx => {
       if (data.options) {
         await tx.variationGroupTemplateOption.deleteMany({ where: { templateId } })
       }
@@ -108,7 +106,7 @@ export const variationTemplateService = {
     await this.ensureTemplate(templateId, shopId)
 
     if (archiveOnly) {
-      const template = await db.variationGroupTemplate.update({
+      const template = await prisma.variationGroupTemplate.update({
         where: { id: templateId },
         data: { isActive: false },
         include: includeOptions,
@@ -116,7 +114,7 @@ export const variationTemplateService = {
       return this.mapTemplate(template)
     }
 
-    await db.variationGroupTemplate.delete({ where: { id: templateId } })
+    await prisma.variationGroupTemplate.delete({ where: { id: templateId } })
     return { id: templateId }
   },
 
@@ -126,7 +124,7 @@ export const variationTemplateService = {
     return {
       name: template.name,
       type: 'custom',
-      choices: template.options.map(option => ({
+      choices: template.options.map((option: { optionLabel: string; priceModifier: number }) => ({
         label: option.optionLabel,
         priceModifier: option.priceModifier,
       })),
@@ -134,7 +132,7 @@ export const variationTemplateService = {
   },
 
   async ensureTemplate(templateId: number, shopId: number) {
-    const template = await db.variationGroupTemplate.findFirst({
+    const template = await prisma.variationGroupTemplate.findFirst({
       where: { id: templateId, shopId },
       select: { id: true },
     })
