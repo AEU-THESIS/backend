@@ -4,18 +4,14 @@ import {
   CreateVariationTemplateSchema,
   UpdateVariationTemplateSchema,
   VariationTemplateQuerySchema,
+  VariationTemplateDeleteQuerySchema,
 } from '../validations/variationTemplateValidation'
 import { variationTemplateService } from '../services/variationTemplateService'
-import { AppError } from '../utils/appError'
 
 export const variationTemplateController = {
   getAll: catchAsync(async (req: Request, res: Response) => {
-    const parsed = VariationTemplateQuerySchema.safeParse(req.query)
-    if (!parsed.success) {
-      throw new AppError('Validation error', HttpStatus.BAD_REQUEST)
-    }
-
-    const templates = await variationTemplateService.getByShop(req.user!.shop_id, parsed.data)
+    const parsed = VariationTemplateQuerySchema.parse(req.query)
+    const templates = await variationTemplateService.getByShop(req.user!.shop_id, parsed)
     return sendSuccess(res, templates)
   }),
 
@@ -44,7 +40,8 @@ export const variationTemplateController = {
 
   delete: catchAsync(async (req: Request, res: Response) => {
     const { id } = idParamSchema.parse(req.params)
-    const archiveOnly = req.query.archive === 'true'
+    const { archive } = VariationTemplateDeleteQuerySchema.parse(req.query)
+    const archiveOnly = archive === 'true'
     const result = await variationTemplateService.delete(id, req.user!.shop_id, archiveOnly)
     return sendSuccess(
       res,

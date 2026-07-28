@@ -37,7 +37,7 @@ router.delete(
   variationTemplateController.delete
 )
 router.post(
-  '/:id/apply',
+  '/:id/applications',
   authenticate,
   requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
   variationTemplateController.apply

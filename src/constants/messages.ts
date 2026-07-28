@@ -58,4 +58,6 @@ export const Messages = {
   PROMOTION_IN_USE: 'This promotion cannot be deleted because it has been used in orders',
   PROMOTION_ITEM_CONFLICT:
     'One or more selected items or categories already belong to another promotion. Remove them from the other promotion first.',
+  // Variation Templates
+  VARIATION_TEMPLATE_NOT_FOUND: 'Variation template not found',
 } as const

@@ -1,4 +1,4 @@
-import { prisma, AppError, HttpStatus } from '../core/Service'
+import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   CreateVariationTemplateInput,
   UpdateVariationTemplateInput,
@@ -42,7 +42,7 @@ export const variationTemplateService = {
     })
 
     if (!template) {
-      throw new AppError('Variation template not found', HttpStatus.NOT_FOUND)
+      throw new AppError(Messages.VARIATION_TEMPLATE_NOT_FOUND, HttpStatus.NOT_FOUND)
     }
 
     return this.mapTemplate(template)
@@ -138,7 +138,7 @@ export const variationTemplateService = {
     })
 
     if (!template) {
-      throw new AppError('Variation template not found', HttpStatus.NOT_FOUND)
+      throw new AppError(Messages.VARIATION_TEMPLATE_NOT_FOUND, HttpStatus.NOT_FOUND)
     }
   },
 
