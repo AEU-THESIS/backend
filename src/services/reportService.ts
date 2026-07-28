@@ -1,4 +1,4 @@
-import { prisma, AppError, HttpStatus } from '../core/Service'
+import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import {
   getPeriodStartDate,
   getItemReportRange,
@@ -9,6 +9,59 @@ import {
 } from '../utils/date'
 
 export const reportService = {
+  async getDailySummary(shopId: number, date?: string) {
+    let targetDate = new Date()
+
+    if (date) {
+      const parsed = new Date(`${date}T00:00:00`)
+      if (isNaN(parsed.getTime())) {
+        throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+      }
+      targetDate = parsed
+    }
+
+    const startOfDay = new Date(targetDate)
+    startOfDay.setHours(0, 0, 0, 0)
+
+    const endOfDay = new Date(targetDate)
+    endOfDay.setHours(23, 59, 59, 999)
+
+    const [groups, shop] = await Promise.all([
+      prisma.order.groupBy({
+        by: ['paymentMethod'],
+        where: {
+          shopId,
+          paymentStatus: 'paid',
+          createdAt: { gte: startOfDay, lte: endOfDay },
+        },
+        _sum: { totalAmount: true },
+      }),
+      prisma.shop.findUnique({
+        where: { id: shopId },
+        select: { exchangeRate: true },
+      }),
+    ])
+
+    let totalRevenue = 0
+    let cashTotal = 0
+    let khqrTotal = 0
+
+    groups.forEach(g => {
+      const sum = Number(g._sum.totalAmount ?? 0)
+      totalRevenue += sum
+
+      const method = g.paymentMethod?.toLowerCase().trim()
+      if (method === 'cash') cashTotal += sum
+      else if (method === 'khqr') khqrTotal += sum
+    })
+
+    return {
+      total_revenue: Math.round(totalRevenue * 100) / 100,
+      cash_total: Math.round(cashTotal * 100) / 100,
+      khqr_total: Math.round(khqrTotal * 100) / 100,
+      exchange_rate: Number(shop?.exchangeRate ?? 4100),
+    }
+  },
   /**
    * Headline KPIs for the analytics dashboard: net sales (USD), total paid
    * orders, and active staff — with period-over-period trends for the first two.

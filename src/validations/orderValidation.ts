@@ -29,6 +29,7 @@ export type CreateOrderInput = z.infer<typeof CreateOrderSchema>
 export const GetOrdersQuerySchema = z.object({
   status: z.string().optional(),
   paymentStatus: z.string().optional(),
+  paymentMethod: z.enum(['cash', 'khqr']).optional(),
   date: z.string().optional(),
   search: z.string().optional(),
   startDate: z.string().optional(),

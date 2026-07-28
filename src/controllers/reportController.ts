@@ -1,19 +1,12 @@
-import {
-  Request,
-  Response,
-  catchAsync,
-  sendSuccess,
-  HttpStatus,
-  Messages,
-} from '../core/Controller'
+import { Request, Response, catchAsync, sendSuccess } from '../core/Controller'
 import { reportService } from '../services/reportService'
 import {
   ReportPeriodSchema,
   ItemPerformanceSchema,
   KpiSummarySchema,
   SalesTrendSchema,
+  DailySummaryQuerySchema,
 } from '../validations/reportValidation'
-import { AppError } from '../utils/appError'
 
 export const reportController = {
   getKpiSummary: catchAsync(async (req: Request, res: Response) => {
@@ -88,5 +81,12 @@ export const reportController = {
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     return res.status(200).send(csvContent)
+  }),
+  getReportToday: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { date } = DailySummaryQuerySchema.parse(req.query)
+
+    const summary = await reportService.getDailySummary(shopId, date)
+    return sendSuccess(res, summary)
   }),
 }

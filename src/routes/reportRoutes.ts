@@ -18,5 +18,10 @@ router.get('/item-performance', reportController.getItemPerformance)
 router.get('/category-performance', reportController.getCategoryPerformance)
 router.get('/inventory-insights', reportController.getInventoryInsights)
 router.get('/exports', reportController.exportCSV)
+router.get(
+  '/daily-summary',
+  requireRoles([ROLES.ADMIN, ROLES.CASHIER]),
+  reportController.getReportToday
+)
 
 export default router
