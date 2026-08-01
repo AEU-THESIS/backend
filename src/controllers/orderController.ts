@@ -27,19 +27,23 @@ export const orderController = {
       throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
 
+    // Create the order and get basic response
     const result = await orderService.createOrder(userId, shopId, parsed.data)
+
+    // ✨ CHANGE: Fetch the fully populated order object including timestamp, items, and promotion data
+    const fullOrder = await orderService.getOrderById(shopId, result.id)
 
     // Broadcast the newly created full order tree to connected kitchen staff asynchronously
     ;(async () => {
       try {
-        const fullOrder = await orderService.getOrderById(shopId, result.id)
         orderSseController.safeBroadcastToShop(shopId, 'order_created', fullOrder)
       } catch (sseError) {
         console.error('⚠️ [SSE] Failed to broadcast new order to kitchen:', sseError)
       }
     })()
 
-    return sendSuccess(res, result, Messages.ORDER_CREATED, HttpStatus.CREATED)
+    // ✨ CHANGE: Return the fully populated order object to the client instead of partial result
+    return sendSuccess(res, fullOrder, Messages.ORDER_CREATED, HttpStatus.CREATED)
   }),
 
   getAll: catchAsync(async (req: Request, res: Response) => {
