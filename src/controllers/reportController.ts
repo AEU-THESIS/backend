@@ -1,22 +1,51 @@
-import {
-  Request,
-  Response,
-  catchAsync,
-  sendSuccess,
-  HttpStatus,
-  Messages,
-} from '../core/Controller'
+import { Request, Response, catchAsync, sendSuccess } from '../core/Controller'
 import { reportService } from '../services/reportService'
-import { ReportPeriodSchema } from '../validations/reportValidation'
-import { AppError } from '../utils/appError'
+import {
+  ReportPeriodSchema,
+  ItemPerformanceSchema,
+  KpiSummarySchema,
+  SalesTrendSchema,
+  DailySummaryQuerySchema,
+} from '../validations/reportValidation'
 
 export const reportController = {
+  getKpiSummary: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { range, startDate, endDate } = KpiSummarySchema.parse(req.query)
+
+    const summary = await reportService.getKpiSummary(shopId, range, startDate, endDate)
+    return sendSuccess(res, summary)
+  }),
+
+  getSellingItems: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { type, period, month, startDate, endDate } = ItemPerformanceSchema.parse(req.query)
+
+    const items = await reportService.getSellingItems(
+      shopId,
+      type,
+      period,
+      month,
+      startDate,
+      endDate
+    )
+    return sendSuccess(res, items)
+  }),
+
   getOverview: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
     const { period } = ReportPeriodSchema.parse(req.query)
 
     const overview = await reportService.getSalesOverview(shopId, period)
     return sendSuccess(res, overview)
+  }),
+
+  getSalesTrend: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { granularity, startDate, endDate } = SalesTrendSchema.parse(req.query)
+
+    const trend = await reportService.getSalesTrend(shopId, granularity, startDate, endDate)
+    return sendSuccess(res, trend)
   }),
 
   getItemPerformance: catchAsync(async (req: Request, res: Response) => {
@@ -52,5 +81,12 @@ export const reportController = {
     res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     return res.status(200).send(csvContent)
+  }),
+  getReportToday: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { date } = DailySummaryQuerySchema.parse(req.query)
+
+    const summary = await reportService.getDailySummary(shopId, date)
+    return sendSuccess(res, summary)
   }),
 }

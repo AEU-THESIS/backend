@@ -58,6 +58,59 @@
  *       403:
  *         description: Forbidden (Requires Admin privileges)
  *
+ * /api/reports/sales-trend:
+ *   get:
+ *     tags:
+ *       - Reports
+ *     summary: Retrieve net-sales time series for the overview chart
+ *     description: Returns an ordered list of net-sales (USD) data points bucketed by the selected granularity — weekly (current week, Mon→Sun), monthly (current year, Jan→current month), or yearly (last 5 years).
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: granularity
+ *         schema:
+ *           type: string
+ *           enum: [weekly, monthly, yearly]
+ *           default: weekly
+ *         required: false
+ *         description: The bucketing granularity for the sales trend.
+ *     responses:
+ *       200:
+ *         description: Sales trend retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Operation successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     granularity:
+ *                       type: string
+ *                       example: "weekly"
+ *                     points:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           label:
+ *                             type: string
+ *                             example: "Mon"
+ *                           value:
+ *                             type: number
+ *                             example: 1420.5
+ *       401:
+ *         description: Unauthorized (Invalid or missing JWT)
+ *       403:
+ *         description: Forbidden (Requires Admin privileges)
+ *
  * /api/reports/item-performance:
  *   get:
  *     tags:
@@ -269,4 +322,57 @@
  *             schema:
  *               type: string
  *               example: '"Order Number","Date","Cashier","Type","Total (USD)","Currency","Amount Received","Payment Status"\n"ORD-072165","2026-05-19T03:17:29.000Z","System","dine_in","3.00","USD","3.00","paid"'
+ *
+ * /api/reports/daily-summary:
+ *   get:
+ *     tags:
+ *       - Reports
+ *     summary: Retrieve the daily cash/KHQR revenue summary
+ *     description: Returns total paid revenue for a shop on a given day, broken down by cash and KHQR payment methods, along with the shop's exchange rate. Accessible to both Admin and Cashier roles. Defaults to the current day if no date is provided.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-07-22"
+ *         required: false
+ *         description: The target date to summarize, in YYYY-MM-DD format. Defaults to today when omitted.
+ *     responses:
+ *       200:
+ *         description: Daily summary retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Operation successful"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     total_revenue:
+ *                       type: number
+ *                       example: 45.00
+ *                     cash_total:
+ *                       type: number
+ *                       example: 30.00
+ *                     khqr_total:
+ *                       type: number
+ *                       example: 15.00
+ *                     exchange_rate:
+ *                       type: number
+ *                       example: 4100
+ *       400:
+ *         description: Validation error (invalid date format)
+ *       401:
+ *         description: Unauthorized (Invalid or missing JWT)
+ *       403:
+ *         description: Forbidden (Requires Admin or Cashier privileges)
  */
