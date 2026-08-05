@@ -2,12 +2,29 @@ import { Router } from 'express'
 import { uploadImage, removeImage } from '../controllers/upload.controller'
 import { upload } from '../utils/fileUpload'
 import { authenticate } from '../middlewares/authMiddleware'
+import { requireRoles } from '../middlewares/roleMiddleware'
+import { uploadLimiter } from '../middlewares/rateLimiter'
+import { ROLES } from '../constants/roles'
 
 const router = Router()
 
-// Endpoint for uploading an image
-// We require authentication to upload images
-router.post('/', authenticate, upload.single('image'), uploadImage)
-router.delete('/', authenticate, removeImage)
+// Image upload/delete are restricted to Admin and Manager.
+// A Cashier has no upload UI but could otherwise call these endpoints directly.
+router.post(
+  '/',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  uploadLimiter,
+  upload.single('image'),
+  uploadImage
+)
+
+router.delete(
+  '/',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  uploadLimiter,
+  removeImage
+)
 
 export default router
