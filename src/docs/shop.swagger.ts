@@ -46,8 +46,11 @@
  *   get:
  *     tags:
  *       - Shop
- *     summary: Get authenticated shop settings (Admin Only)
- *     description: Fetch the shop configuration associated with the authenticated user's JWT.
+ *     summary: Get authenticated shop settings (All roles)
+ *     description: >
+ *       Fetch the shop configuration associated with the authenticated user's JWT.
+ *       Readable by any authenticated role (Admin, Manager, Cashier).
+ *       `bakongAccountId` is returned only for Admins.
  *     security:
  *       - BearerAuth: []
  *     responses:
@@ -55,8 +58,6 @@
  *         description: Successfully retrieved shop settings
  *       401:
  *         description: Unauthorized
- *       403:
- *         description: Forbidden (Requires Admin Role)
  *       404:
  *         description: Shop not found
  *   put:
