@@ -112,7 +112,7 @@
  *                       example: 42
  *                     orderNumber:
  *                       type: string
- *                       example: ORD-7902463
+ *                       example: ORD-1-20260805-0001
  *                     totalAmount:
  *                       type: number
  *                       example: 4.50
@@ -229,7 +229,7 @@
  *                             example: 1
  *                           orderNumber:
  *                             type: string
- *                             example: ORD-12345
+ *                             example: ORD-1-20260805-0001
  *                           totalAmount:
  *                             type: number
  *                             example: 12.50
@@ -335,7 +335,7 @@
  *                       example: 1
  *                     orderNumber:
  *                       type: string
- *                       example: ORD-12345
+ *                       example: ORD-1-20260805-0001
  *                     totalAmount:
  *                       type: number
  *                       example: 12.50
@@ -419,7 +419,7 @@
  *                       example: 1
  *                     orderNumber:
  *                       type: string
- *                       example: ORD-12345
+ *                       example: ORD-1-20260805-0001
  *                     fulfillmentStatus:
  *                       type: string
  *                       example: ready

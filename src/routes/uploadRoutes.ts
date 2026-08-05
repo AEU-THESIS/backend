@@ -3,7 +3,7 @@ import { uploadImage, removeImage } from '../controllers/upload.controller'
 import { upload } from '../utils/fileUpload'
 import { authenticate } from '../middlewares/authMiddleware'
 import { requireRoles } from '../middlewares/roleMiddleware'
-import { uploadLimiter } from '../middlewares/rateLimiter'
+import { uploadLimiter } from '../middlewares/rateLimiterMiddleware'
 import { ROLES } from '../constants/roles'
 
 const router = Router()
