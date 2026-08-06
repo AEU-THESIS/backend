@@ -481,6 +481,9 @@ model Order {
   transactions      Transaction[]
   appliedPromotions OrderPromotion[]
 
+  @@index([shopId, createdAt])
+  @@index([shopId, paymentStatus, createdAt])
+  @@index([shopId, fulfillmentStatus])
   @@map("orders")
 }
 
@@ -542,5 +545,6 @@ model Transaction {
 
   order Order @relation(fields: [orderId], references: [id])
 
+  @@index([orderId])
   @@map("transactions")
 }
