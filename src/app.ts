@@ -13,6 +13,23 @@ const app = express()
 
 /**
  * -----------------------------
+ * Trust the reverse-proxy chain
+ * -----------------------------
+ * In staging/production the request path is: Cloudflare -> nginx -> this app.
+ * Without `trust proxy`, Express reads the socket peer (the nginx container IP)
+ * as `req.ip`, which is IDENTICAL for every user. Rate limiters keyed on
+ * `req.ip` would then share a single bucket across the whole team, so one busy
+ * user (or a few staff at once) blocks everyone.
+ *
+ * Setting the number of trusted hops makes Express resolve the REAL client IP
+ * from `X-Forwarded-For`. Default 2 = [nginx, Cloudflare]; override with
+ * TRUST_PROXY_HOPS if the deployment topology changes. Locally (no proxy /
+ * no X-Forwarded-For) this safely falls back to the socket IP.
+ */
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 2))
+
+/**
+ * -----------------------------
  * Security middlewares
  * -----------------------------
  */
@@ -47,17 +64,28 @@ app.use(
 
 /**
  * -----------------------------
- * Global API Rate Limiting (DOS Protection)
+ * Global API Rate Limiting (DoS protection)
  * -----------------------------
+ * A safety net against scripted abuse — NOT a throttle on normal staff work.
+ * Keyed on the real client IP (see `trust proxy` above).
+ *
+ * Defaults: 300 requests / 60s per IP. A single-page POS fires many requests
+ * per screen, so the previous 100 / 15min was far too tight for interactive
+ * use. The short 60s window also means anyone who does hit the cap is cleared
+ * within a minute instead of being locked out for 15. Tune via env without a
+ * redeploy: RATE_LIMIT_WINDOW_MS and RATE_LIMIT_MAX.
  */
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000 /* 15 minutes */,
-  max: 100 /* Limit each IP to 100 requests per 15 mins */,
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60 * 1000),
+  max: Number(process.env.RATE_LIMIT_MAX ?? 300),
   standardHeaders: true,
   legacyHeaders: false,
+  // The realtime order stream is a long-lived SSE connection the browser
+  // auto-reconnects; it must never burn the request budget.
+  skip: req => req.originalUrl.startsWith('/api/orders/stream'),
   message: {
     success: false,
-    message: 'Too many requests from this IP, please try again later.',
+    message: 'Too many requests, please slow down and try again in a moment.',
   },
 })
 app.use('/api', limiter)
