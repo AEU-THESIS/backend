@@ -17,7 +17,7 @@ export const shopController = {
   }),
 
   getAll: catchAsync(async (req: Request, res: Response) => {
-    const shops = await shopService.getAll()
+    const shops = await shopService.getAll(req.user!.shop_id)
     return sendSuccess(res, shops)
   }),
 

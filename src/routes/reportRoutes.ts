@@ -6,9 +6,10 @@ import { ROLES } from '../constants/roles'
 
 const router = Router()
 
-// Protect all reporting endpoints under authentication and restrict to Admin privilege only
+// Protect all reporting endpoints under authentication. Admin and Manager may
+// view reporting data (Dashboard analytics + Sale reports); Cashier may not.
 router.use(authenticate)
-router.use(requireRoles([ROLES.ADMIN]))
+router.use(requireRoles([ROLES.ADMIN, ROLES.MANAGER]))
 
 router.get('/kpi-summary', reportController.getKpiSummary)
 router.get('/sales-overview', reportController.getOverview)
@@ -20,7 +21,7 @@ router.get('/inventory-insights', reportController.getInventoryInsights)
 router.get('/exports', reportController.exportCSV)
 router.get(
   '/daily-summary',
-  requireRoles([ROLES.ADMIN, ROLES.CASHIER]),
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
   reportController.getReportToday
 )
 

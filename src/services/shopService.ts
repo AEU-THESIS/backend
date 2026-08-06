@@ -43,8 +43,13 @@ export const shopService = {
     }
   },
 
-  async getAll() {
-    return prisma.shop.findMany()
+  async getAll(shopId: number) {
+    // Multi-tenant isolation: a caller may only ever see their own shop, never
+    // the full table. Kept as a list to preserve the endpoint's response shape.
+    return prisma.shop.findMany({
+      where: { id: shopId },
+      select: shopSettingsSelect,
+    })
   },
 
   async getSettings(shopId: number, role?: string | null) {
