@@ -43,7 +43,7 @@ export const shopService = {
     }
   },
 
-  async getAll(shopId: number) {
+  async getByShopId(shopId: number) {
     // Multi-tenant isolation: a caller may only ever see their own shop, never
     // the full table. Kept as a list to preserve the endpoint's response shape.
     return prisma.shop.findMany({
