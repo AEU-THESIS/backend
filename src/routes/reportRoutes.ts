@@ -6,21 +6,23 @@ import { ROLES } from '../constants/roles'
 
 const router = Router()
 
-// Protect all reporting endpoints under authentication and restrict to Admin privilege only
+// All reporting endpoints require authentication.
 router.use(authenticate)
-router.use(requireRoles([ROLES.ADMIN]))
+const reportingRoles = requireRoles([ROLES.ADMIN, ROLES.MANAGER])
 
-router.get('/kpi-summary', reportController.getKpiSummary)
-router.get('/sales-overview', reportController.getOverview)
-router.get('/sales-trend', reportController.getSalesTrend)
-router.get('/selling-items', reportController.getSellingItems)
-router.get('/item-performance', reportController.getItemPerformance)
-router.get('/category-performance', reportController.getCategoryPerformance)
-router.get('/inventory-insights', reportController.getInventoryInsights)
-router.get('/exports', reportController.exportCSV)
+router.get('/kpi-summary', reportingRoles, reportController.getKpiSummary)
+router.get('/sales-overview', reportingRoles, reportController.getOverview)
+router.get('/sales-trend', reportingRoles, reportController.getSalesTrend)
+router.get('/selling-items', reportingRoles, reportController.getSellingItems)
+router.get('/item-performance', reportingRoles, reportController.getItemPerformance)
+router.get('/category-performance', reportingRoles, reportController.getCategoryPerformance)
+router.get('/inventory-insights', reportingRoles, reportController.getInventoryInsights)
+router.get('/exports', reportingRoles, reportController.exportCSV)
+
+// Daily summary is additionally available to Cashiers.
 router.get(
   '/daily-summary',
-  requireRoles([ROLES.ADMIN, ROLES.CASHIER]),
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
   reportController.getReportToday
 )
 

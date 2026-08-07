@@ -20,6 +20,7 @@ router.put('/settings', requireRoles([ROLES.ADMIN]), shopController.updateSettin
 
 // Only Admins can create shops
 router.post('/', requireRoles([ROLES.ADMIN]), shopController.create)
-router.get('/', shopController.getAll)
+// Admin-only: returns just the caller's own shop (service scopes by shop_id).
+router.get('/', requireRoles([ROLES.ADMIN]), shopController.getAll)
 
 export default router
