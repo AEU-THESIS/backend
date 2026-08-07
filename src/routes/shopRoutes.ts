@@ -9,7 +9,13 @@ const router = Router()
 // Protect shop routes securely
 router.use(authenticate)
 
-router.get('/settings', requireRoles([ROLES.ADMIN]), shopController.getSettings)
+// Any authenticated role may READ settings (currency, exchange rate, order-management
+// flag are needed app-wide). Editing stays Admin-only.
+router.get(
+  '/settings',
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
+  shopController.getSettings
+)
 router.put('/settings', requireRoles([ROLES.ADMIN]), shopController.updateSettings)
 
 // Only Admins can create shops
