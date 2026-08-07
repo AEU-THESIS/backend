@@ -1,4 +1,5 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
+import { ROLES } from '../constants/roles'
 import type { CreateShopInput, UpdateShopSettingsInput } from '../validations/shopValidation'
 
 const shopSettingsSelect = {
@@ -42,11 +43,16 @@ export const shopService = {
     }
   },
 
-  async getAll() {
-    return prisma.shop.findMany()
+  async getByShopId(shopId: number) {
+    // Multi-tenant isolation: a caller may only ever see their own shop, never
+    // the full table. Kept as a list to preserve the endpoint's response shape.
+    return prisma.shop.findMany({
+      where: { id: shopId },
+      select: shopSettingsSelect,
+    })
   },
 
-  async getSettings(shopId: number) {
+  async getSettings(shopId: number, role?: string | null) {
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
       select: shopSettingsSelect,
@@ -54,6 +60,12 @@ export const shopService = {
 
     if (!shop) {
       throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    // bakongAccountId is sensitive payment config — expose it to Admins only.
+    // (undefined is dropped from the JSON response.)
+    if (role !== ROLES.ADMIN) {
+      return { ...shop, bakongAccountId: undefined }
     }
 
     return shop

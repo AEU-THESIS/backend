@@ -8,13 +8,69 @@
  *   get:
  *     tags:
  *       - Shop
- *     summary: Get all shops
- *     description: Retrieve a list of all configured shops
+ *     summary: Get the authenticated Admin's own shop (Admin Only)
+ *     description: >
+ *       Returns a single-element list containing only the shop tied to the
+ *       authenticated Admin's JWT (tenant-scoped by shop_id) — never other shops'
+ *       data. Restricted to the Admin role.
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Successfully retrieved shops
+ *         description: Successfully retrieved the caller's shop
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   description: Always zero or one shop (the caller's own).
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       name:
+ *                         type: string
+ *                       slug:
+ *                         type: string
+ *                       ownerName:
+ *                         type: string
+ *                         nullable: true
+ *                       phone:
+ *                         type: string
+ *                         nullable: true
+ *                       address:
+ *                         type: string
+ *                         nullable: true
+ *                       bakongAccountId:
+ *                         type: string
+ *                         nullable: true
+ *                       currencySymbol:
+ *                         type: string
+ *                       exchangeRate:
+ *                         type: string
+ *                       receiptFooter:
+ *                         type: string
+ *                         nullable: true
+ *                       isOrderManagementEnabled:
+ *                         type: boolean
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                       updatedAt:
+ *                         type: string
+ *                         format: date-time
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (Requires Admin Role)
  *   post:
  *     tags:
  *       - Shop
@@ -46,8 +102,11 @@
  *   get:
  *     tags:
  *       - Shop
- *     summary: Get authenticated shop settings (Admin Only)
- *     description: Fetch the shop configuration associated with the authenticated user's JWT.
+ *     summary: Get authenticated shop settings (All roles)
+ *     description: >
+ *       Fetch the shop configuration associated with the authenticated user's JWT.
+ *       Readable by any authenticated role (Admin, Manager, Cashier).
+ *       `bakongAccountId` is returned only for Admins.
  *     security:
  *       - BearerAuth: []
  *     responses:
@@ -55,8 +114,6 @@
  *         description: Successfully retrieved shop settings
  *       401:
  *         description: Unauthorized
- *       403:
- *         description: Forbidden (Requires Admin Role)
  *       404:
  *         description: Shop not found
  *   put:

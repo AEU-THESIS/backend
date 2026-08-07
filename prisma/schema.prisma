@@ -48,6 +48,7 @@ model Shop {
   categories     Category[]
   products       Product[]
   optionSets     OptionSet[]
+  variationGroupTemplates VariationGroupTemplate[]
   promotions     Promotion[]
   ingredients    Ingredient[]
   notifications  Notification[]
@@ -83,6 +84,7 @@ model User {
   shop           Shop                  @relation(fields: [shopId], references: [id])
   roles          RoleUser[]
   ingredientLogs IngredientLog[]
+  variationGroupTemplates VariationGroupTemplate[]
   orders         Order[]
   personalTokens PersonalAccessToken[]
 
@@ -242,6 +244,40 @@ model ProductOptionSet {
   optionSet OptionSet @relation(fields: [optionSetId], references: [id], onDelete: Cascade)
 
   @@map("product_option_sets")
+}
+
+model VariationGroupTemplate {
+  id          Int      @id @default(autoincrement())
+  shopId      Int      @map("shop_id")
+  name        String
+  description String?  @db.Text
+  category    String
+  createdBy   Int      @map("created_by")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop    Shop                           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  creator User                           @relation(fields: [createdBy], references: [id])
+  options VariationGroupTemplateOption[]
+
+  @@index([shopId, isActive])
+  @@map("variation_group_templates")
+}
+
+model VariationGroupTemplateOption {
+  id            Int      @id @default(autoincrement())
+  templateId    Int      @map("template_id")
+  optionLabel   String   @map("option_label")
+  priceModifier Decimal  @default(0.00) @map("price_modifier") @db.Decimal(10, 2)
+  displayOrder  Int      @default(0) @map("display_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  template VariationGroupTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, displayOrder])
+  @@map("variation_group_template_options")
 }
 
 // ==========================================
@@ -445,6 +481,9 @@ model Order {
   transactions      Transaction[]
   appliedPromotions OrderPromotion[]
 
+  @@index([shopId, createdAt])
+  @@index([shopId, paymentStatus, createdAt])
+  @@index([shopId, fulfillmentStatus])
   @@map("orders")
 }
 
@@ -506,5 +545,6 @@ model Transaction {
 
   order Order @relation(fields: [orderId], references: [id])
 
+  @@index([orderId])
   @@map("transactions")
 }

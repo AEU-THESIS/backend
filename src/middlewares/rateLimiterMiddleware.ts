@@ -29,3 +29,19 @@ export const loginLimiter = rateLimit({
     message: 'Too many login attempts. Please try again later.',
   },
 })
+
+/**
+ * Limiter for image upload/delete endpoints.
+ * Image processing (sharp) and disk writes are resource-intensive, so we cap
+ * each IP to 30 requests per 15 minutes on top of the global API limiter.
+ */
+export const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // 30 requests
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many upload requests. Please try again later.',
+  },
+})

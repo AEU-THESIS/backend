@@ -5,6 +5,52 @@ import { promotionService } from './promotionService'
 import { cartDiscounts, type CartLineForCalc } from '../utils/promotionDiscount'
 import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
 
+/**
+ * Builds the next per-shop, per-day order number, e.g. `ORD-1-20260805-0001`.
+ * The sequence resets each business day (the date is part of the number) and is
+ * derived from the most recent order for today's prefix. Must run INSIDE the
+ * checkout transaction so the read and the insert are atomic; simultaneous
+ * checkouts that pick the same number are resolved by `withUniqueRetry`.
+ * Because `shopId` is embedded, the global unique on `orderNumber` is enough —
+ * no cross-shop or intra-shop collision is possible without hitting it.
+ */
+async function nextDailyOrderNumber(tx: Prisma.TransactionClient, shopId: number): Promise<string> {
+  const datePart = shopDateString(0).replace(/-/g, '') // YYYYMMDD in the shop's timezone
+  const prefix = `ORD-${shopId}-${datePart}-`
+
+  const last = await tx.order.findFirst({
+    where: { shopId, orderNumber: { startsWith: prefix } },
+    orderBy: { id: 'desc' },
+    select: { orderNumber: true },
+  })
+
+  const lastSeq = last ? Number(last.orderNumber.slice(prefix.length)) : 0
+  const nextSeq = Number.isFinite(lastSeq) ? lastSeq + 1 : 1
+  return `${prefix}${String(nextSeq).padStart(4, '0')}`
+}
+
+/**
+ * Runs `fn`, retrying on a Prisma unique-constraint violation (P2002). Lets two
+ * simultaneous checkouts that generated the same order number recover
+ * automatically instead of surfacing a validation error to the cashier.
+ */
+async function withUniqueRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        attempt < retries
+      ) {
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
     const {
@@ -163,9 +209,6 @@ export const orderService = {
     // ── 4. Calculate change ───────────────────────────────────────────
     const changeAmount = Math.round((receivedAmount - totalInPaymentCurrency) * 100) / 100
 
-    // ── 5. Generate order number ───────────────────────────────────────
-    const orderNumber = `ORD-${Date.now().toString().slice(-7)}`
-
     // Fetch the shop settings to check if order management dashboard is enabled
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
@@ -175,92 +218,100 @@ export const orderService = {
     const fulfillmentStatus = shop?.isOrderManagementEnabled !== false ? 'preparing' : 'completed'
 
     // ── 6. Atomic transaction: Order + Items + Options + Inventory ────
-    const order = await prisma.$transaction(async tx => {
-      // Re-verify the applied promotions still exist and are active inside the tx.
-      // If one was deleted/deactivated between the read above and now, keep the
-      // already-quoted discount (the customer was charged netTotal) but only record
-      // and redeem the ones that survive, so a vanished promotion can't roll back an
-      // otherwise-valid paid sale (fail-open).
-      let activeAppliedIds: number[] = []
-      if (appliedPromotionIds.length > 0) {
-        const stillActive = await tx.promotion.findMany({
-          where: { id: { in: appliedPromotionIds }, shopId, isActive: true },
-          select: { id: true },
-        })
-        activeAppliedIds = stillActive.map(p => p.id)
-      }
-      const effectivePromotionId =
-        primaryPromotionId && activeAppliedIds.includes(primaryPromotionId)
-          ? primaryPromotionId
-          : (activeAppliedIds[0] ?? null)
+    // Retried on a duplicate order number (P2002) so a collision never reaches
+    // the cashier as an error.
+    const order = await withUniqueRetry(() =>
+      prisma.$transaction(async tx => {
+        // Generate the order number inside the tx so the read and the insert
+        // are atomic (line-level uniqueness enforced by the DB + retry above).
+        const orderNumber = await nextDailyOrderNumber(tx, shopId)
 
-      // Create the Order
-      const createdOrder = await tx.order.create({
-        data: {
-          shopId,
-          userId,
-          orderNumber,
-          orderType,
-          // totalAmount holds the net (discounted) total that was actually charged;
-          // discountAmount records how much the promotion took off.
-          totalAmount: netTotal,
-          discountAmount,
-          promotionId: effectivePromotionId,
-          receivedAmount,
-          paymentCurrency,
-          exchangeRateSnapshot,
-          paymentMethod,
-          paymentStatus: 'paid',
-          fulfillmentStatus,
-        },
-      })
+        // Re-verify the applied promotions still exist and are active inside the tx.
+        // If one was deleted/deactivated between the read above and now, keep the
+        // already-quoted discount (the customer was charged netTotal) but only record
+        // and redeem the ones that survive, so a vanished promotion can't roll back an
+        // otherwise-valid paid sale (fail-open).
+        let activeAppliedIds: number[] = []
+        if (appliedPromotionIds.length > 0) {
+          const stillActive = await tx.promotion.findMany({
+            where: { id: { in: appliedPromotionIds }, shopId, isActive: true },
+            select: { id: true },
+          })
+          activeAppliedIds = stillActive.map(p => p.id)
+        }
+        const effectivePromotionId =
+          primaryPromotionId && activeAppliedIds.includes(primaryPromotionId)
+            ? primaryPromotionId
+            : (activeAppliedIds[0] ?? null)
 
-      // Record a redemption on every applied promotion (powers the dashboard metric)
-      // and persist a per-promotion discount breakdown so order history can show it.
-      if (activeAppliedIds.length > 0) {
-        await tx.promotion.updateMany({
-          where: { id: { in: activeAppliedIds } },
-          data: { timesRedeemed: { increment: 1 } },
-        })
-        await tx.orderPromotion.createMany({
-          data: applied
-            .filter(a => activeAppliedIds.includes(a.promotion.id))
-            .map(a => ({
-              orderId: createdOrder.id,
-              promotionId: a.promotion.id,
-              discountAmount: a.discount,
-            })),
-        })
-      }
-
-      // Create OrderItems + OrderItemOptions using fully validated server-canonical data
-      for (const valItem of validatedItemsList) {
-        const createdItem = await tx.orderItem.create({
+        // Create the Order
+        const createdOrder = await tx.order.create({
           data: {
-            orderId: createdOrder.id,
-            productId: valItem.productId,
-            quantity: valItem.quantity,
-            price: valItem.basePrice,
-            extraPrice: valItem.optionsExtra,
-            subtotal: valItem.subtotal,
+            shopId,
+            userId,
+            orderNumber,
+            orderType,
+            // totalAmount holds the net (discounted) total that was actually charged;
+            // discountAmount records how much the promotion took off.
+            totalAmount: netTotal,
+            discountAmount,
+            promotionId: effectivePromotionId,
+            receivedAmount,
+            paymentCurrency,
+            exchangeRateSnapshot,
+            paymentMethod,
+            paymentStatus: 'paid',
+            fulfillmentStatus,
           },
         })
 
-        // Create selected option records using canonical data
-        for (const option of valItem.validatedOptions) {
-          await tx.orderItemOption.create({
-            data: {
-              orderItemId: createdItem.id,
-              groupName: option.groupName,
-              optionName: option.optionName,
-              extraPrice: option.extraPrice,
-            },
+        // Record a redemption on every applied promotion (powers the dashboard metric)
+        // and persist a per-promotion discount breakdown so order history can show it.
+        if (activeAppliedIds.length > 0) {
+          await tx.promotion.updateMany({
+            where: { id: { in: activeAppliedIds } },
+            data: { timesRedeemed: { increment: 1 } },
+          })
+          await tx.orderPromotion.createMany({
+            data: applied
+              .filter(a => activeAppliedIds.includes(a.promotion.id))
+              .map(a => ({
+                orderId: createdOrder.id,
+                promotionId: a.promotion.id,
+                discountAmount: a.discount,
+              })),
           })
         }
-      }
 
-      return createdOrder
-    })
+        // Create OrderItems + OrderItemOptions using fully validated server-canonical data
+        for (const valItem of validatedItemsList) {
+          const createdItem = await tx.orderItem.create({
+            data: {
+              orderId: createdOrder.id,
+              productId: valItem.productId,
+              quantity: valItem.quantity,
+              price: valItem.basePrice,
+              extraPrice: valItem.optionsExtra,
+              subtotal: valItem.subtotal,
+            },
+          })
+
+          // Persist all selected options for this item in one round trip
+          if (valItem.validatedOptions.length > 0) {
+            await tx.orderItemOption.createMany({
+              data: valItem.validatedOptions.map(option => ({
+                orderItemId: createdItem.id,
+                groupName: option.groupName,
+                optionName: option.optionName,
+                extraPrice: option.extraPrice,
+              })),
+            })
+          }
+        }
+
+        return createdOrder
+      })
+    )
 
     return {
       id: order.id,
