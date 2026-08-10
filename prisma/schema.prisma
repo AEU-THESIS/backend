@@ -370,6 +370,13 @@ model Ingredient {
   unitOfMeasure     String   @map("unit_of_measure")
   currentStock      Decimal  @default(0.00) @map("current_stock") @db.Decimal(10, 2)
   lowStockThreshold Decimal  @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
+  // Weighted-average cost per unit. 4 dp (not 2) so small per-unit costs — e.g.
+  // coffee at $18/kg = $0.018/g — aren't rounded to zero.
+  unitCost          Decimal  @default(0.0000) @map("unit_cost") @db.Decimal(12, 4)
+  // Most recent purchase price per unit (the price from the last stock-in).
+  lastUnitCost      Decimal  @default(0.0000) @map("last_unit_cost") @db.Decimal(12, 4)
+  // Currency the cost figures are recorded in (the shop's configured currency).
+  costCurrency      String   @default("$") @map("cost_currency")
   imageUrl          String?  @map("image_url") @db.LongText
   updatedAt         DateTime @updatedAt @map("updated_at")
 
@@ -398,6 +405,9 @@ model IngredientLog {
   userId          Int      @map("user_id")
   transactionType String   @map("transaction_type")
   quantityChanged Decimal  @map("quantity_changed") @db.Decimal(10, 2)
+  // Purchase price per unit at the moment of a stock-in (USD base). Null for
+  // removals. Captures cost history so past spend can be reconstructed later.
+  unitCost        Decimal? @map("unit_cost") @db.Decimal(12, 4)
   reason          String?
   createdAt       DateTime @default(now()) @map("created_at")
 

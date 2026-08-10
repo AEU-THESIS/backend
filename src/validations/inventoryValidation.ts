@@ -15,6 +15,9 @@ const inventoryItemBaseSchema = z.object({
   quantity: nonNegativeDecimal.default(0),
   minAlertThreshold: nonNegativeDecimal.optional(),
   min_alert_threshold: nonNegativeDecimal.optional(),
+  // Cost price per unit (shop base currency). Optional — the user "can" record it.
+  unitCost: nonNegativeDecimal.optional(),
+  unit_cost: nonNegativeDecimal.optional(),
 })
 
 type InventoryItemAliasInput = Partial<z.infer<typeof inventoryItemBaseSchema>>
@@ -47,6 +50,20 @@ const validateAliasPairs = (data: InventoryItemAliasInput, ctx: z.RefinementCtx)
       })
     })
   }
+
+  if (
+    data.unitCost !== undefined &&
+    data.unit_cost !== undefined &&
+    data.unitCost !== data.unit_cost
+  ) {
+    ;(['unitCost', 'unit_cost'] as const).forEach(path => {
+      ctx.addIssue({
+        code: 'custom',
+        path: [path],
+        message: 'unitCost and unit_cost must match when both are provided',
+      })
+    })
+  }
 }
 
 export const createInventoryItemSchema = inventoryItemBaseSchema.superRefine(validateAliasPairs)
@@ -59,6 +76,10 @@ export const updateInventoryItemSchema = inventoryItemBaseSchema
 export const adjustInventoryItemSchema = z.object({
   adjustment_type: z.enum(['add', 'remove']),
   change_amount: positiveDecimal,
+  // Purchase price per unit for this stock-in (only used when adding stock).
+  // Nullish: the client omits it or sends null (e.g. on removals, or to accept the
+  // current cost); the service then defaults to the item's existing cost.
+  unit_cost: nonNegativeDecimal.nullish(),
   notes: z.string().trim().optional().nullable(),
 })
 
@@ -68,7 +89,17 @@ export const inventoryQuerySchema = z.object({
   unit: z.string().trim().optional(),
 })
 
+// History is filtered by date range and paginated on the server, so the client
+// refetches when the period or page changes.
+export const inventoryHistoryQuerySchema = z.object({
+  from: z.string().trim().min(1).optional(),
+  to: z.string().trim().min(1).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(5),
+})
+
 export type CreateInventoryItemInput = z.infer<typeof createInventoryItemSchema>
 export type UpdateInventoryItemInput = z.infer<typeof updateInventoryItemSchema>
 export type AdjustInventoryItemInput = z.infer<typeof adjustInventoryItemSchema>
 export type InventoryQueryInput = z.infer<typeof inventoryQuerySchema>
+export type InventoryHistoryQueryInput = z.infer<typeof inventoryHistoryQuerySchema>
