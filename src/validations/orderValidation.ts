@@ -18,9 +18,11 @@ export const CreateOrderSchema = z.strictObject({
   orderType: z.enum(['dine_in', 'takeaway']),
   paymentMethod: z.literal('cash'),
   paymentCurrency: z.enum(['USD', 'KHR']),
-  receivedAmount: z.number().positive('Received amount must be a positive number'),
-  exchangeRateSnapshot: z.number().positive('Exchange rate must be positive'),
-  totalAmount: z.number().positive('Total amount must be positive'),
+  // Amount handed over, in the chosen payment currency. Allowed to be 0 so a
+  // 100%-off order can be completed. The server owns the total and the exchange
+  // rate — neither `totalAmount` nor `exchangeRateSnapshot` is accepted from the
+  // client (a strict schema rejects them outright so a forged rate can't apply).
+  receivedAmount: z.number().min(0, 'Received amount must be zero or more'),
   items: z.array(OrderItemSchema).min(1, 'Order must have at least one item'),
 })
 

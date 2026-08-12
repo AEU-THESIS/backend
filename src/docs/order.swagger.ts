@@ -23,8 +23,6 @@
  *               - paymentMethod
  *               - paymentCurrency
  *               - receivedAmount
- *               - exchangeRateSnapshot
- *               - totalAmount
  *               - items
  *             properties:
  *               orderType:
@@ -41,13 +39,8 @@
  *                 example: USD
  *               receivedAmount:
  *                 type: number
+ *                 description: Amount handed over in the payment currency. May be 0 for a 100%-off order. The total and exchange rate are computed server-side and are NOT accepted from the client.
  *                 example: 5.00
- *               exchangeRateSnapshot:
- *                 type: number
- *                 example: 4100
- *               totalAmount:
- *                 type: number
- *                 example: 4.00
  *               items:
  *                 type: array
  *                 minItems: 1
@@ -118,15 +111,22 @@
  *                       example: 4.50
  *                     receivedAmount:
  *                       type: number
+ *                       description: Amount received in the payment currency (riel for KHR, dollars for USD).
+ *                       example: 5.00
+ *                     receivedAmountUsd:
+ *                       type: number
+ *                       description: Received amount normalised to USD for currency-agnostic reporting.
  *                       example: 5.00
  *                     paymentCurrency:
  *                       type: string
  *                       example: USD
  *                     changeAmount:
  *                       type: number
+ *                       description: Change returned in the payment currency (riel rounded down to the nearest 100៛).
  *                       example: 0.50
  *                     exchangeRateSnapshot:
  *                       type: number
+ *                       description: Server-resolved shop exchange rate applied to this order.
  *                       example: 4100
  *                     paymentStatus:
  *                       type: string
