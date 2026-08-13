@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { promotionService } from './promotionService'
 import { cartDiscounts, type CartLineForCalc } from '../utils/promotionDiscount'
 import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
+import { round2, roundRielUp, roundRielDown } from '../utils/money'
 
 /**
  * Builds the next per-shop, per-day order number, e.g. `ORD-1-20260805-0001`.
@@ -51,16 +52,64 @@ async function withUniqueRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T>
   }
 }
 
+type ProductOptionSetWithElements = Prisma.ProductOptionSetGetPayload<{
+  include: { optionSet: { include: { elements: true } } }
+}>
+
+interface OptionSetInfo {
+  groupName: string
+  elementsMap: Map<number, { optionName: string; extraPrice: number }>
+}
+
+interface ProductOptionIndex {
+  // productId -> optionSetId -> option-set info (labels + per-element extra price)
+  cache: Map<number, Map<number, OptionSetInfo>>
+  // productId -> ids of option sets that MUST be chosen
+  requiredSets: Map<number, Set<number>>
+  // productId -> ids of the size-type option sets (a by-size product prices off one)
+  sizeSets: Map<number, Set<number>>
+}
+
+/**
+ * Builds a secure lookup index of a product's option sets for order validation.
+ * Prices and labels come from here (never the client), and it records which sets
+ * are required and which provide the size so the item guards can be enforced.
+ */
+function indexProductOptionSets(
+  productOptionSets: ProductOptionSetWithElements[]
+): ProductOptionIndex {
+  const cache = new Map<number, Map<number, OptionSetInfo>>()
+  const requiredSets = new Map<number, Set<number>>()
+  const sizeSets = new Map<number, Set<number>>()
+
+  const track = (map: Map<number, Set<number>>, productId: number, setId: number) => {
+    if (!map.has(productId)) map.set(productId, new Set())
+    map.get(productId)!.add(setId)
+  }
+
+  for (const productOptionSet of productOptionSets) {
+    const { productId, optionSetId, optionSet } = productOptionSet
+    if (!cache.has(productId)) cache.set(productId, new Map())
+
+    const elementsMap = new Map<number, { optionName: string; extraPrice: number }>()
+    for (const element of optionSet.elements) {
+      elementsMap.set(element.id, {
+        optionName: element.label,
+        extraPrice: Number(element.priceModifier),
+      })
+    }
+    cache.get(productId)!.set(optionSetId, { groupName: optionSet.name, elementsMap })
+
+    if (productOptionSet.isRequired) track(requiredSets, productId, optionSetId)
+    if (optionSet.type === 'size') track(sizeSets, productId, optionSetId)
+  }
+
+  return { cache, requiredSets, sizeSets }
+}
+
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
-    const {
-      orderType,
-      paymentMethod,
-      paymentCurrency,
-      receivedAmount,
-      exchangeRateSnapshot,
-      items,
-    } = payload
+    const { orderType, paymentMethod, paymentCurrency, receivedAmount, items } = payload
 
     // ── 1. Validate all products belong to this shop ──────────────────
     const productIds = items.map(i => i.productId)
@@ -75,7 +124,8 @@ export const orderService = {
 
     const productMap = new Map(products.map(p => [p.id, p]))
 
-    // Fetch secure option sets and elements assigned to these products
+    // Fetch secure option sets and elements assigned to these products, then index
+    // them for validation (price cache + which sets are required + the size sets).
     const productOptionSets = await prisma.productOptionSet.findMany({
       where: { productId: { in: uniqueProductIds } },
       include: {
@@ -87,34 +137,11 @@ export const orderService = {
       },
     })
 
-    // Build secure lookup cache: productId -> OptionSetId -> OptionSetInfo
-    const productOptionsCache = new Map<
-      number,
-      Map<
-        number,
-        { groupName: string; elementsMap: Map<number, { optionName: string; extraPrice: number }> }
-      >
-    >()
-
-    for (const pos of productOptionSets) {
-      if (!productOptionsCache.has(pos.productId)) {
-        productOptionsCache.set(pos.productId, new Map())
-      }
-      const optionSetsMap = productOptionsCache.get(pos.productId)!
-
-      const elementsMap = new Map<number, { optionName: string; extraPrice: number }>()
-      for (const elem of pos.optionSet.elements) {
-        elementsMap.set(elem.id, {
-          optionName: elem.label,
-          extraPrice: Number(elem.priceModifier),
-        })
-      }
-
-      optionSetsMap.set(pos.optionSetId, {
-        groupName: pos.optionSet.name,
-        elementsMap,
-      })
-    }
+    const {
+      cache: productOptionsCache,
+      requiredSets: requiredSetsByProduct,
+      sizeSets: sizeSetsByProduct,
+    } = indexProductOptionSets(productOptionSets)
 
     // ── 2. Server-side price recalculation & Validation ────────────────
     let serverTotal = 0
@@ -133,10 +160,14 @@ export const orderService = {
 
     for (const item of items) {
       const product = productMap.get(item.productId)!
-      const basePrice = Number(product.price)
+      // For a by-size product the base price is null on purpose (the real price
+      // lives in the size option); treat null as 0 so it can't silently become a
+      // valid-looking number, then enforce the guards below.
+      const basePrice = product.price == null ? 0 : Number(product.price)
 
       let optionsExtra = 0
       const validatedOptions = []
+      const chosenSetIds = new Set<number>()
 
       const optionSetsMap = productOptionsCache.get(item.productId)
 
@@ -153,12 +184,37 @@ export const orderService = {
 
         const dbExtraPrice = optionElement.extraPrice
         optionsExtra += dbExtraPrice
+        chosenSetIds.add(option.optionSetId)
 
         validatedOptions.push({
           groupName: optionSet.groupName,
           optionName: optionElement.optionName,
           extraPrice: dbExtraPrice,
         })
+      }
+
+      // Every required option set for this product must have been chosen.
+      const requiredSetIds = requiredSetsByProduct.get(item.productId)
+      if (requiredSetIds) {
+        for (const requiredSetId of requiredSetIds) {
+          if (!chosenSetIds.has(requiredSetId)) {
+            throw new AppError(Messages.ORDER_ITEM_REQUIRES_OPTION, HttpStatus.BAD_REQUEST)
+          }
+        }
+      }
+
+      // A by-size product prices off its size option, so a size-type set must be
+      // among the choices (not just any option). No line may total 0 either, which
+      // would let a customer be charged nothing for a real item.
+      if (product.priceMode === 'by_size') {
+        const sizeSetIds = sizeSetsByProduct.get(item.productId)
+        const hasSizeChosen = !!sizeSetIds && [...sizeSetIds].some(id => chosenSetIds.has(id))
+        if (!hasSizeChosen) {
+          throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
+        }
+      }
+      if (basePrice + optionsExtra <= 0) {
+        throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
       }
 
       const subtotal = (basePrice + optionsExtra) * item.quantity
@@ -198,24 +254,47 @@ export const orderService = {
     // Never let stacked/fixed-amount discounts push the charge below zero.
     const netTotal = Math.max(0, Math.round((serverTotal - discountAmount) * 100) / 100)
 
-    // ── 3. Validate received amount is sufficient (against the net total) ─
+    // ── 3. Resolve the authoritative exchange rate & payment amounts ──────
+    // The exchange rate is read from the shop record (Shop Settings), never
+    // trusted from the client, so the amount due always reflects the shop's own
+    // configured rate and a customer can never underpay with a forged rate.
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { exchangeRate: true, isOrderManagementEnabled: true },
+    })
+
+    if (!shop) {
+      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    const exchangeRate = Number(shop.exchangeRate)
+    // Guard against a missing/misconfigured rate before it is used in the KHR
+    // conversion (a zero or NaN rate would corrupt the amount due and receivedAmountUsd).
+    if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) {
+      throw new AppError(Messages.INVALID_EXCHANGE_RATE, HttpStatus.INTERNAL_SERVER_ERROR)
+    }
+
+    const fulfillmentStatus = shop.isOrderManagementEnabled !== false ? 'preparing' : 'completed'
+
+    // Amount due in the payment currency. Riel is rounded UP to the nearest 100៛
+    // (the smallest note) so the cashier can always collect it.
     const totalInPaymentCurrency =
-      paymentCurrency === 'KHR' ? Math.ceil(netTotal * exchangeRateSnapshot) : netTotal
+      paymentCurrency === 'KHR' ? roundRielUp(netTotal * exchangeRate) : round2(netTotal)
 
     if (receivedAmount < totalInPaymentCurrency) {
       throw new AppError(Messages.INSUFFICIENT_PAYMENT, HttpStatus.BAD_REQUEST)
     }
 
-    // ── 4. Calculate change ───────────────────────────────────────────
-    const changeAmount = Math.round((receivedAmount - totalInPaymentCurrency) * 100) / 100
+    // ── 4. Calculate change & normalise the received amount to USD ────────
+    // Change is rounded DOWN to the nearest 100៛ for riel so only payable notes
+    // are returned. receivedAmountUsd lets reports sum every sale in one currency.
+    const changeAmount =
+      paymentCurrency === 'KHR'
+        ? roundRielDown(receivedAmount - totalInPaymentCurrency)
+        : round2(receivedAmount - totalInPaymentCurrency)
 
-    // Fetch the shop settings to check if order management dashboard is enabled
-    const shop = await prisma.shop.findUnique({
-      where: { id: shopId },
-      select: { isOrderManagementEnabled: true },
-    })
-
-    const fulfillmentStatus = shop?.isOrderManagementEnabled !== false ? 'preparing' : 'completed'
+    const receivedAmountUsd =
+      paymentCurrency === 'KHR' ? round2(receivedAmount / exchangeRate) : round2(receivedAmount)
 
     // ── 6. Atomic transaction: Order + Items + Options + Inventory ────
     // Retried on a duplicate order number (P2002) so a collision never reaches
@@ -257,8 +336,12 @@ export const orderService = {
             discountAmount,
             promotionId: effectivePromotionId,
             receivedAmount,
+            receivedAmountUsd,
+            changeAmount,
             paymentCurrency,
-            exchangeRateSnapshot,
+            // Persist the server-resolved rate so historical orders reconcile
+            // exactly even if the shop later changes its exchange rate.
+            exchangeRateSnapshot: exchangeRate,
             paymentMethod,
             paymentStatus: 'paid',
             fulfillmentStatus,
@@ -323,9 +406,10 @@ export const orderService = {
       promotionId: order.promotionId,
       totalAmount: netTotal,
       receivedAmount,
+      receivedAmountUsd,
       paymentCurrency,
       changeAmount,
-      exchangeRateSnapshot,
+      exchangeRateSnapshot: exchangeRate,
       paymentStatus: order.paymentStatus,
       fulfillmentStatus: order.fulfillmentStatus,
     }

@@ -40,6 +40,10 @@ export const Messages = {
   ORDER_STATUS_UPDATED: 'Order status updated successfully',
   INSUFFICIENT_PAYMENT: 'Received amount is insufficient for the total',
   ORDER_VALIDATION_FAILED: 'One or more items in the order are invalid',
+  ORDER_ITEM_REQUIRES_OPTION: 'A required option was not selected for one or more items',
+  ORDER_ITEM_PRICE_INVALID:
+    'One or more items have an invalid price (a size or option must be selected)',
+  INVALID_EXCHANGE_RATE: 'Shop exchange rate is invalid; please update it in Shop Settings',
   ORDERS_RETRIEVED: 'Orders retrieved successfully',
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',

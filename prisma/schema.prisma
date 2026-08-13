@@ -16,10 +16,12 @@ enum ProductType {
   drink
   food
 }
+
 enum PriceMode {
   fixed
   by_size
 }
+
 enum OptionSetType {
   size
   custom
@@ -29,31 +31,31 @@ enum OptionSetType {
 // CORE: SHOP
 // ==========================================
 model Shop {
-  id              Int      @id @default(autoincrement())
-  name            String
-  slug            String   @unique
-  ownerName       String?  @map("owner_name")
-  phone           String?
-  address         String?  @db.Text
-  bakongAccountId String?  @map("bakong_account_id")
-  currencySymbol  String   @default("$") @map("currency_symbol")
-  exchangeRate    Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
-  receiptFooter   String?  @map("receipt_footer") @db.Text
-  isOrderManagementEnabled Boolean @default(true) @map("is_order_management_enabled")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                       Int      @id @default(autoincrement())
+  name                     String
+  slug                     String   @unique
+  ownerName                String?  @map("owner_name")
+  phone                    String?
+  address                  String?  @db.Text
+  bakongAccountId          String?  @map("bakong_account_id")
+  currencySymbol           String   @default("$") @map("currency_symbol")
+  exchangeRate             Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
+  receiptFooter            String?  @map("receipt_footer") @db.Text
+  isOrderManagementEnabled Boolean  @default(true) @map("is_order_management_enabled")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
-  users          User[]
-  roles          Role[]
-  categories     Category[]
-  products       Product[]
-  optionSets     OptionSet[]
+  users                   User[]
+  roles                   Role[]
+  categories              Category[]
+  products                Product[]
+  optionSets              OptionSet[]
   variationGroupTemplates VariationGroupTemplate[]
-  promotions     Promotion[]
-  ingredients    Ingredient[]
-  notifications  Notification[]
-  shopTables     ShopTable[]
-  orders         Order[]
+  promotions              Promotion[]
+  ingredients             Ingredient[]
+  notifications           Notification[]
+  shopTables              ShopTable[]
+  orders                  Order[]
 
   @@map("shops")
 }
@@ -81,12 +83,12 @@ model User {
   deletedAt     DateTime? @map("deleted_at")
   isDeleted     Boolean   @default(false) @map("is_deleted")
 
-  shop           Shop                  @relation(fields: [shopId], references: [id])
-  roles          RoleUser[]
-  ingredientLogs IngredientLog[]
+  shop                    Shop                     @relation(fields: [shopId], references: [id])
+  roles                   RoleUser[]
+  ingredientLogs          IngredientLog[]
   variationGroupTemplates VariationGroupTemplate[]
-  orders         Order[]
-  personalTokens PersonalAccessToken[]
+  orders                  Order[]
+  personalTokens          PersonalAccessToken[]
 
   @@unique([email, isDeleted], map: "users_email_is_deleted_key")
   @@unique([employeeId, isDeleted], map: "users_employee_id_is_deleted_key")
@@ -209,11 +211,11 @@ model Product {
 }
 
 model OptionSet {
-  id        Int      @id @default(autoincrement())
-  shopId    Int      @map("shop_id")
+  id        Int           @id @default(autoincrement())
+  shopId    Int           @map("shop_id")
   name      String
   type      OptionSetType @map("type")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime      @default(now()) @map("created_at")
 
   shop     Shop               @relation(fields: [shopId], references: [id])
   elements OptionSetElement[]
@@ -461,7 +463,14 @@ model Order {
   totalAmount          Decimal @map("total_amount") @db.Decimal(10, 2)
   discountAmount       Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
   receivedAmount       Decimal @map("received_amount") @db.Decimal(10, 2)
+  // Received amount normalised to USD (receivedAmount holds the native payment
+  // currency — riel for KHR payments, dollars for USD). Powers currency-agnostic
+  // reporting so a mixed-currency day can be summed in a single column.
+  receivedAmountUsd    Decimal @default(0.00) @map("received_amount_usd") @db.Decimal(10, 2)
+  // Change returned to the customer, in the payment currency (note-rounded for KHR).
+  changeAmount         Decimal @default(0.00) @map("change_amount") @db.Decimal(10, 2)
   paymentCurrency      String  @map("payment_currency")
+  // Snapshot of the shop's exchange rate at checkout (server-authoritative).
   exchangeRateSnapshot Decimal @map("exchange_rate_snapshot") @db.Decimal(10, 2)
 
   paymentMethod String  @map("payment_method")
