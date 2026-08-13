@@ -39,7 +39,8 @@
  *                 example: USD
  *               receivedAmount:
  *                 type: number
- *                 description: Amount handed over in the payment currency. May be 0 for a 100%-off order. The total and exchange rate are computed server-side and are NOT accepted from the client.
+ *                 minimum: 0
+ *                 description: Amount handed over in the payment currency. May be 0 for a 100%-off order. For KHR it must be a whole number of 100៛ notes. The total and exchange rate are computed server-side and are NOT accepted from the client.
  *                 example: 5.00
  *               items:
  *                 type: array

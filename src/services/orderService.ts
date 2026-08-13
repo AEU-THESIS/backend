@@ -52,6 +52,61 @@ async function withUniqueRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T>
   }
 }
 
+type ProductOptionSetWithElements = Prisma.ProductOptionSetGetPayload<{
+  include: { optionSet: { include: { elements: true } } }
+}>
+
+interface OptionSetInfo {
+  groupName: string
+  elementsMap: Map<number, { optionName: string; extraPrice: number }>
+}
+
+interface ProductOptionIndex {
+  // productId -> optionSetId -> option-set info (labels + per-element extra price)
+  cache: Map<number, Map<number, OptionSetInfo>>
+  // productId -> ids of option sets that MUST be chosen
+  requiredSets: Map<number, Set<number>>
+  // productId -> ids of the size-type option sets (a by-size product prices off one)
+  sizeSets: Map<number, Set<number>>
+}
+
+/**
+ * Builds a secure lookup index of a product's option sets for order validation.
+ * Prices and labels come from here (never the client), and it records which sets
+ * are required and which provide the size so the item guards can be enforced.
+ */
+function indexProductOptionSets(
+  productOptionSets: ProductOptionSetWithElements[]
+): ProductOptionIndex {
+  const cache = new Map<number, Map<number, OptionSetInfo>>()
+  const requiredSets = new Map<number, Set<number>>()
+  const sizeSets = new Map<number, Set<number>>()
+
+  const track = (map: Map<number, Set<number>>, productId: number, setId: number) => {
+    if (!map.has(productId)) map.set(productId, new Set())
+    map.get(productId)!.add(setId)
+  }
+
+  for (const productOptionSet of productOptionSets) {
+    const { productId, optionSetId, optionSet } = productOptionSet
+    if (!cache.has(productId)) cache.set(productId, new Map())
+
+    const elementsMap = new Map<number, { optionName: string; extraPrice: number }>()
+    for (const element of optionSet.elements) {
+      elementsMap.set(element.id, {
+        optionName: element.label,
+        extraPrice: Number(element.priceModifier),
+      })
+    }
+    cache.get(productId)!.set(optionSetId, { groupName: optionSet.name, elementsMap })
+
+    if (productOptionSet.isRequired) track(requiredSets, productId, optionSetId)
+    if (optionSet.type === 'size') track(sizeSets, productId, optionSetId)
+  }
+
+  return { cache, requiredSets, sizeSets }
+}
+
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
     const { orderType, paymentMethod, paymentCurrency, receivedAmount, items } = payload
@@ -69,7 +124,8 @@ export const orderService = {
 
     const productMap = new Map(products.map(p => [p.id, p]))
 
-    // Fetch secure option sets and elements assigned to these products
+    // Fetch secure option sets and elements assigned to these products, then index
+    // them for validation (price cache + which sets are required + the size sets).
     const productOptionSets = await prisma.productOptionSet.findMany({
       where: { productId: { in: uniqueProductIds } },
       include: {
@@ -81,45 +137,11 @@ export const orderService = {
       },
     })
 
-    // Build secure lookup cache: productId -> OptionSetId -> OptionSetInfo
-    const productOptionsCache = new Map<
-      number,
-      Map<
-        number,
-        { groupName: string; elementsMap: Map<number, { optionName: string; extraPrice: number }> }
-      >
-    >()
-
-    // Track which option sets are REQUIRED per product so an order can be rejected
-    // when a mandatory choice (e.g. the size of a by-size drink) is missing.
-    const requiredSetsByProduct = new Map<number, Set<number>>()
-
-    for (const pos of productOptionSets) {
-      if (!productOptionsCache.has(pos.productId)) {
-        productOptionsCache.set(pos.productId, new Map())
-      }
-      const optionSetsMap = productOptionsCache.get(pos.productId)!
-
-      const elementsMap = new Map<number, { optionName: string; extraPrice: number }>()
-      for (const elem of pos.optionSet.elements) {
-        elementsMap.set(elem.id, {
-          optionName: elem.label,
-          extraPrice: Number(elem.priceModifier),
-        })
-      }
-
-      optionSetsMap.set(pos.optionSetId, {
-        groupName: pos.optionSet.name,
-        elementsMap,
-      })
-
-      if (pos.isRequired) {
-        if (!requiredSetsByProduct.has(pos.productId)) {
-          requiredSetsByProduct.set(pos.productId, new Set())
-        }
-        requiredSetsByProduct.get(pos.productId)!.add(pos.optionSetId)
-      }
-    }
+    const {
+      cache: productOptionsCache,
+      requiredSets: requiredSetsByProduct,
+      sizeSets: sizeSetsByProduct,
+    } = indexProductOptionSets(productOptionSets)
 
     // ── 2. Server-side price recalculation & Validation ────────────────
     let serverTotal = 0
@@ -181,10 +203,15 @@ export const orderService = {
         }
       }
 
-      // A by-size product must have a size chosen, and no line may total 0 (which
-      // would let a customer be charged nothing for a real item).
-      if (product.priceMode === 'by_size' && chosenSetIds.size === 0) {
-        throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
+      // A by-size product prices off its size option, so a size-type set must be
+      // among the choices (not just any option). No line may total 0 either, which
+      // would let a customer be charged nothing for a real item.
+      if (product.priceMode === 'by_size') {
+        const sizeSetIds = sizeSetsByProduct.get(item.productId)
+        const hasSizeChosen = !!sizeSetIds && [...sizeSetIds].some(id => chosenSetIds.has(id))
+        if (!hasSizeChosen) {
+          throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
+        }
       }
       if (basePrice + optionsExtra <= 0) {
         throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
@@ -241,6 +268,12 @@ export const orderService = {
     }
 
     const exchangeRate = Number(shop.exchangeRate)
+    // Guard against a missing/misconfigured rate before it is used in the KHR
+    // conversion (a zero or NaN rate would corrupt the amount due and receivedAmountUsd).
+    if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) {
+      throw new AppError(Messages.INVALID_EXCHANGE_RATE, HttpStatus.INTERNAL_SERVER_ERROR)
+    }
+
     const fulfillmentStatus = shop.isOrderManagementEnabled !== false ? 'preparing' : 'completed'
 
     // Amount due in the payment currency. Riel is rounded UP to the nearest 100៛
