@@ -69,3 +69,18 @@ export const UpdateOrderStatusSchema = z.object({
 })
 
 export type UpdateOrderStatusInput = z.infer<typeof UpdateOrderStatusSchema>
+
+// Whole-order void: an optional free-text reason the manager can record.
+export const VoidOrderSchema = z.object({
+  reason: z.string().trim().max(255).optional(),
+})
+
+export type VoidOrderInput = z.infer<typeof VoidOrderSchema>
+
+// Route params for cancelling a single line item on an order.
+export const CancelOrderItemParamsSchema = z.object({
+  id: z.coerce.number().int().positive('Invalid order ID'),
+  itemId: z.coerce.number().int().positive('Invalid item ID'),
+})
+
+export type CancelOrderItemParamsInput = z.infer<typeof CancelOrderItemParamsSchema>

@@ -2,7 +2,12 @@ import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { CreateOrderInput } from '../validations/orderValidation'
 import { Prisma } from '@prisma/client'
 import { promotionService } from './promotionService'
-import { cartDiscounts, type CartLineForCalc } from '../utils/promotionDiscount'
+import {
+  cartDiscounts,
+  recalcSurvivorMoney,
+  type CartLineForCalc,
+  type PromotionForCalc,
+} from '../utils/promotionDiscount'
 import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
 import { round2, roundRielUp, roundRielDown } from '../utils/money'
 
@@ -105,6 +110,162 @@ function indexProductOptionSets(
   }
 
   return { cache, requiredSets, sizeSets }
+}
+
+type OrderForCancel = Prisma.OrderGetPayload<{
+  include: {
+    items: { include: { product: { select: { categoryId: true } } } }
+    appliedPromotions: { select: { promotionId: true; discountAmount: true } }
+  }
+}>
+
+/** Loads an order (scoped to the shop) with everything the cancel/void flow needs. */
+async function loadOrderForCancel(shopId: number, orderId: number): Promise<OrderForCancel | null> {
+  return prisma.order.findFirst({
+    where: { id: orderId, shopId },
+    include: {
+      items: { include: { product: { select: { categoryId: true } } } },
+      appliedPromotions: { select: { promotionId: true, discountAmount: true } },
+    },
+  })
+}
+
+/** Fetches the given promotions in the exact shape the discount engine expects. */
+async function fetchPromotionsForCalc(
+  tx: Prisma.TransactionClient,
+  promotionIds: number[]
+): Promise<PromotionForCalc[]> {
+  if (promotionIds.length === 0) return []
+  const promotions = await tx.promotion.findMany({
+    where: { id: { in: promotionIds } },
+    select: {
+      id: true,
+      discountType: true,
+      discountValue: true,
+      scope: true,
+      categories: { select: { categoryId: true } },
+      products: { select: { productId: true } },
+    },
+  })
+  return promotions.map(p => ({
+    id: p.id,
+    discountType: p.discountType,
+    discountValue: Number(p.discountValue),
+    scope: p.scope,
+    categoryIds: p.categories.map(c => c.categoryId),
+    productIds: p.products.map(pr => pr.productId),
+  }))
+}
+
+/**
+ * Core reversal routine shared by whole-order void and single-item cancel. It marks
+ * the targeted items cancelled, recomputes the order over the surviving lines
+ * (re-running promotions so an invalidated one is dropped, not just subtracted),
+ * reconciles promotion redemptions, updates the order's money + status, and writes a
+ * reversing (negative) Transaction for the refunded amount. Runs inside the caller's
+ * transaction so the whole reversal is atomic.
+ */
+async function performCancellation(
+  tx: Prisma.TransactionClient,
+  order: OrderForCancel,
+  cancelItemIds: number[],
+  actingUserId: number,
+  opts: { explicitVoid: boolean; reason?: string | null }
+): Promise<void> {
+  const now = new Date()
+
+  // 1. Mark the targeted items cancelled (whole-line: canceledQuantity = quantity).
+  const itemsToCancel = order.items.filter(item => cancelItemIds.includes(item.id))
+  for (const item of itemsToCancel) {
+    await tx.orderItem.update({
+      where: { id: item.id },
+      data: { canceledAt: now, canceledQuantity: item.quantity },
+    })
+  }
+
+  // 2. Recompute the money over the surviving (still-live) lines.
+  const survivors = order.items.filter(
+    item => item.canceledAt == null && !cancelItemIds.includes(item.id)
+  )
+  const survivingLines: CartLineForCalc[] = survivors.map(item => ({
+    productId: item.productId,
+    categoryId: item.product.categoryId,
+    quantity: item.quantity,
+    unitPrice: Number(item.price) + Number(item.extraPrice),
+    subtotal: Number(item.subtotal),
+  }))
+  const orderPromotionIds = order.appliedPromotions.map(ap => ap.promotionId)
+  const promotionsForCalc = await fetchPromotionsForCalc(tx, orderPromotionIds)
+  const { discountAmount, netTotal, applied } = recalcSurvivorMoney(
+    promotionsForCalc,
+    survivingLines
+  )
+  const stillAppliedIds = new Set(applied.map(a => a.promotion.id))
+
+  // 3. Reconcile promotion redemptions. A promotion that no longer applies to any
+  // survivor is un-redeemed (counter decremented, breakdown row removed); one that
+  // still applies keeps its row with the recomputed discount.
+  for (const ap of order.appliedPromotions) {
+    const key = { orderId_promotionId: { orderId: order.id, promotionId: ap.promotionId } }
+    if (stillAppliedIds.has(ap.promotionId)) {
+      const newDiscount = applied.find(a => a.promotion.id === ap.promotionId)!.discount
+      await tx.orderPromotion.update({ where: key, data: { discountAmount: newDiscount } })
+    } else {
+      await tx.orderPromotion.delete({ where: key })
+      // Clamp at zero so a double-cancel can never drive the counter negative.
+      await tx.promotion.updateMany({
+        where: { id: ap.promotionId, timesRedeemed: { gt: 0 } },
+        data: { timesRedeemed: { decrement: 1 } },
+      })
+    }
+  }
+  const primaryPromotionId = applied.length
+    ? applied.reduce((a, b) => (b.discount > a.discount ? b : a)).promotion.id
+    : null
+
+  // 4. Whole-order void (explicit, or the last surviving line was just cancelled) →
+  // refunded + canceled; otherwise the order is partially refunded and lives on.
+  const fullyVoided = opts.explicitVoid || survivors.length === 0
+  const oldNet = Number(order.totalAmount)
+  const newNet = fullyVoided ? 0 : netTotal
+  const refundUsd = round2(Math.max(0, oldNet - newNet))
+
+  await tx.order.update({
+    where: { id: order.id },
+    data: {
+      totalAmount: newNet,
+      discountAmount: fullyVoided ? 0 : discountAmount,
+      promotionId: fullyVoided ? null : primaryPromotionId,
+      paymentStatus: fullyVoided ? 'refunded' : 'partially_refunded',
+      ...(fullyVoided
+        ? {
+            fulfillmentStatus: 'canceled',
+            voidedAt: now,
+            voidedByUserId: actingUserId,
+            voidReason: opts.reason ?? null,
+          }
+        : {}),
+    },
+  })
+
+  // 5. Reversing payment record: negative amount in the order's payment currency
+  // (riel note-rounded up), attributed to the acting user.
+  if (refundUsd > 0) {
+    const rate = Number(order.exchangeRateSnapshot)
+    const refundInPaymentCurrency =
+      order.paymentCurrency === 'KHR' ? roundRielUp(refundUsd * rate) : round2(refundUsd)
+    await tx.transaction.create({
+      data: {
+        orderId: order.id,
+        userId: actingUserId,
+        paymentMethod: order.paymentMethod,
+        amount: -refundInPaymentCurrency,
+        currency: order.paymentCurrency,
+        status: 'refunded',
+        verifiedAt: now,
+      },
+    })
+  }
 }
 
 export const orderService = {
@@ -575,6 +736,21 @@ export const orderService = {
             promotion: { select: { id: true, name: true, discountType: true } },
           },
         },
+        // Who voided the order (shown in the detail panel), and the reversing payment
+        // records so the panel can show the refunded amount.
+        voidedBy: { select: { id: true, name: true } },
+        transactions: {
+          select: {
+            id: true,
+            amount: true,
+            currency: true,
+            paymentMethod: true,
+            status: true,
+            verifiedAt: true,
+            userId: true,
+          },
+          orderBy: { id: 'desc' },
+        },
       },
     })
 
@@ -586,11 +762,14 @@ export const orderService = {
   },
 
   async updateOrderStatus(shopId: number, orderId: number, status: string) {
-    // 1. Validate status value
-    const validStatuses = ['preparing', 'ready', 'completed', 'canceled']
-    if (!validStatuses.includes(status)) {
+    // 1. Validate status value. Cancelling is NOT a plain status change anymore —
+    // it must reverse the money, so it goes through voidOrder, never this endpoint.
+    const validStatuses = ['preparing', 'ready', 'completed'] as const
+    type FulfillmentTransition = (typeof validStatuses)[number]
+    if (!validStatuses.includes(status as FulfillmentTransition)) {
       throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
+    const nextStatus = status as FulfillmentTransition
 
     // 2. Find order and verify shop ownership
     const order = await prisma.order.findFirst({
@@ -612,7 +791,7 @@ export const orderService = {
           shopId,
         },
         data: {
-          fulfillmentStatus: status,
+          fulfillmentStatus: nextStatus,
         },
         include: {
           items: {
@@ -631,5 +810,58 @@ export const orderService = {
       }
       throw error
     }
+  },
+
+  /**
+   * Voids a whole order: cancels every remaining line, refunds the full remaining
+   * amount (reversing Transaction), un-redeems its promotions, and marks the order
+   * refunded + canceled. Idempotency guard: an already-voided order is rejected.
+   */
+  async voidOrder(shopId: number, orderId: number, userId: number, reason?: string) {
+    const order = await loadOrderForCancel(shopId, orderId)
+    if (!order) {
+      throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    if (order.paymentStatus === 'refunded') {
+      throw new AppError(Messages.ORDER_ALREADY_VOIDED, HttpStatus.BAD_REQUEST)
+    }
+
+    const liveItemIds = order.items.filter(item => item.canceledAt == null).map(item => item.id)
+    await prisma.$transaction(tx =>
+      performCancellation(tx, order, liveItemIds, userId, {
+        explicitVoid: true,
+        reason: reason ?? null,
+      })
+    )
+
+    return orderService.getOrderById(shopId, orderId)
+  },
+
+  /**
+   * Cancels a single line item, recalculates the order over the survivors (re-running
+   * promotions) and refunds the difference. If it was the last live line, the order is
+   * fully voided (refunded + canceled) instead of partially refunded.
+   */
+  async cancelOrderItem(shopId: number, orderId: number, itemId: number, userId: number) {
+    const order = await loadOrderForCancel(shopId, orderId)
+    if (!order) {
+      throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    if (order.paymentStatus === 'refunded') {
+      throw new AppError(Messages.ORDER_ALREADY_VOIDED, HttpStatus.BAD_REQUEST)
+    }
+    const item = order.items.find(i => i.id === itemId)
+    if (!item) {
+      throw new AppError(Messages.ORDER_ITEM_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    if (item.canceledAt != null) {
+      throw new AppError(Messages.ORDER_ITEM_ALREADY_CANCELED, HttpStatus.BAD_REQUEST)
+    }
+
+    await prisma.$transaction(tx =>
+      performCancellation(tx, order, [itemId], userId, { explicitVoid: false })
+    )
+
+    return orderService.getOrderById(shopId, orderId)
   },
 }

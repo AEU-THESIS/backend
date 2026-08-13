@@ -47,4 +47,20 @@ router.put(
   orderController.updateStatus
 )
 
+// 6. Void a whole order (reverses the money: refund + un-redeem promotions)
+router.post(
+  '/:id/void',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
+  orderController.void
+)
+
+// 7. Cancel a single line item (recalculates the order + partial refund)
+router.post(
+  '/:id/items/:itemId/cancel',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
+  orderController.cancelItem
+)
+
 export default router
