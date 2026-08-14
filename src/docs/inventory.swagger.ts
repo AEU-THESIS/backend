@@ -84,7 +84,7 @@
  *       401: { description: Unauthorized }
  *       403: { description: Forbidden (requires Admin or Manager) }
  *
- * /api/inventories/valuation:
+ * /api/inventories/valuations:
  *   get:
  *     tags: [Inventory]
  *     summary: Total stock valuation for the shop (Admin, Manager)
@@ -253,6 +253,7 @@
  *                       properties:
  *                         totalIn: { type: number }
  *                         totalOut: { type: number }
+ *       400: { description: Invalid id, date range, or pagination parameters }
  *       401: { description: Unauthorized }
  *       403: { description: Forbidden (requires Admin or Manager) }
  *       404: { description: Item not found }

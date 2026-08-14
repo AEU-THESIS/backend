@@ -37,7 +37,7 @@ export const inventoryController = {
   create: catchAsync(async (req: Request, res: Response) => {
     const body = createInventoryItemSchema.parse(req.body)
     const imageUrl = await getUploadedImageUrl(req)
-    const item = await inventoryService.create(req.user!.shop_id, body, imageUrl)
+    const item = await inventoryService.create(req.user!.shop_id, req.user!.user_id, body, imageUrl)
     return sendSuccess(res, item, Messages.CREATED, HttpStatus.CREATED)
   }),
 

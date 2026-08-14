@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   AdjustInventoryItemInput,
@@ -6,50 +7,54 @@ import type {
   InventoryQueryInput,
   UpdateInventoryItemInput,
 } from '../validations/inventoryValidation'
-import { calculateWeightedAverageCost } from './inventoryCost'
+import {
+  calculateWeightedAverageCost,
+  roundCost,
+  roundMoney,
+  toDecimal,
+  type DecimalLike,
+} from './inventoryCost'
 
 const DEFAULT_COST_CURRENCY = '$'
 
-const getInventoryStatus = (quantity: number, threshold: number) => {
-  if (quantity <= 0) return 'out_of_stock'
-  if (quantity < threshold) return 'low_stock'
+const getInventoryStatus = (quantity: Prisma.Decimal, threshold: Prisma.Decimal) => {
+  if (quantity.lessThanOrEqualTo(0)) return 'out_of_stock'
+  if (quantity.lessThan(threshold)) return 'low_stock'
   return 'in_stock'
 }
 
-const toNumber = (value: unknown) => Number(value)
-// Money values are rounded to 2 dp; unit cost keeps 4 dp so repeated weighted
-// averages don't accumulate rounding drift.
-const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
-const round4 = (value: number) => Math.round((value + Number.EPSILON) * 10000) / 10000
+// Decimal values stay exact through every calculation and are converted to
+// `number` only here, at the API boundary.
+const serialize = (value: DecimalLike) => toDecimal(value).toNumber()
 
 const mapInventoryItem = (item: {
   id: number
   shopId: number
   name: string
   unitOfMeasure: string
-  currentStock: unknown
-  lowStockThreshold: unknown
-  unitCost: unknown
-  lastUnitCost: unknown
+  currentStock: Prisma.Decimal
+  lowStockThreshold: Prisma.Decimal
+  unitCost: Prisma.Decimal
+  lastUnitCost: Prisma.Decimal
   costCurrency: string
   imageUrl: string | null
   updatedAt: Date
 }) => {
-  const quantity = toNumber(item.currentStock)
-  const minAlertThreshold = toNumber(item.lowStockThreshold)
-  const unitCost = toNumber(item.unitCost)
+  const quantity = toDecimal(item.currentStock)
+  const minAlertThreshold = toDecimal(item.lowStockThreshold)
+  const unitCost = toDecimal(item.unitCost)
 
   return {
     id: item.id,
     shopId: item.shopId,
     name: item.name,
     unitOfMeasure: item.unitOfMeasure,
-    quantity,
-    minAlertThreshold,
-    unitCost,
-    lastUnitCost: toNumber(item.lastUnitCost),
+    quantity: quantity.toNumber(),
+    minAlertThreshold: minAlertThreshold.toNumber(),
+    unitCost: unitCost.toNumber(),
+    lastUnitCost: serialize(item.lastUnitCost),
     costCurrency: item.costCurrency,
-    totalValue: round2(quantity * unitCost),
+    totalValue: roundMoney(quantity.times(unitCost)).toNumber(),
     imageUrl: item.imageUrl,
     status: getInventoryStatus(quantity, minAlertThreshold),
     updatedAt: item.updatedAt,
@@ -78,9 +83,12 @@ const getUnitCost = (data: CreateInventoryItemInput | UpdateInventoryItemInput) 
   return undefined
 }
 
+/** Soft-deleted items are invisible to every read path. */
+const ACTIVE = { deletedAt: null } as const
+
 const getExistingInventoryItem = async (id: number, shopId: number) => {
   const item = await prisma.ingredient.findFirst({
-    where: { id, shopId },
+    where: { id, shopId, ...ACTIVE },
   })
 
   if (!item) {
@@ -97,6 +105,7 @@ export const inventoryService = {
     const items = await prisma.ingredient.findMany({
       where: {
         shopId,
+        ...ACTIVE,
         ...(unit && { unitOfMeasure: unit }),
         ...(search && {
           OR: [{ name: { contains: search } }, { unitOfMeasure: { contains: search } }],
@@ -111,26 +120,47 @@ export const inventoryService = {
     return mappedItems.filter(item => item.status === query.status)
   },
 
-  async create(shopId: number, data: CreateInventoryItemInput, imageUrl?: string) {
-    const initialCost = getUnitCost(data) ?? 0
+  async create(shopId: number, userId: number, data: CreateInventoryItemInput, imageUrl?: string) {
+    const initialCost = toDecimal(getUnitCost(data) ?? 0)
+    const initialQuantity = toDecimal(data.quantity)
     // Record the item's cost in whatever currency the shop is configured with.
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
       select: { currencySymbol: true },
     })
 
-    const item = await prisma.ingredient.create({
-      data: {
-        shopId,
-        name: data.name,
-        unitOfMeasure: getUnitOfMeasure(data) || 'unit',
-        currentStock: data.quantity,
-        lowStockThreshold: getMinAlertThreshold(data) ?? 0,
-        unitCost: initialCost,
-        lastUnitCost: initialCost,
-        costCurrency: shop?.currencySymbol || DEFAULT_COST_CURRENCY,
-        imageUrl,
-      },
+    // Creating an item with opening stock *is* a stock-in. Logged in the same
+    // transaction as the item, otherwise the audit trail starts empty and the
+    // history endpoint reports totalIn: 0 for stock that is plainly on hand.
+    const item = await prisma.$transaction(async tx => {
+      const created = await tx.ingredient.create({
+        data: {
+          shopId,
+          name: data.name,
+          unitOfMeasure: getUnitOfMeasure(data) || 'unit',
+          currentStock: initialQuantity,
+          lowStockThreshold: getMinAlertThreshold(data) ?? 0,
+          unitCost: initialCost,
+          lastUnitCost: initialCost,
+          costCurrency: shop?.currencySymbol || DEFAULT_COST_CURRENCY,
+          imageUrl,
+        },
+      })
+
+      if (initialQuantity.greaterThan(0)) {
+        await tx.ingredientLog.create({
+          data: {
+            ingredientId: created.id,
+            userId,
+            transactionType: 'add',
+            quantityChanged: initialQuantity,
+            unitCost: initialCost,
+            reason: Messages.INITIAL_STOCK,
+          },
+        })
+      }
+
+      return created
     })
 
     return mapInventoryItem(item)
@@ -138,6 +168,18 @@ export const inventoryService = {
 
   async update(id: number, shopId: number, data: UpdateInventoryItemInput, imageUrl?: string) {
     await getExistingInventoryItem(id, shopId)
+
+    const unitCost = getUnitCost(data)
+    // A manual cost update *establishes* the cost, so the currency label has to
+    // follow the shop. Without this, an item whose currency was backfilled to a
+    // default would keep showing that symbol against a local-currency figure.
+    const shop =
+      unitCost === undefined
+        ? null
+        : await prisma.shop.findUnique({
+            where: { id: shopId },
+            select: { currencySymbol: true },
+          })
 
     const item = await prisma.ingredient.update({
       where: { id },
@@ -148,9 +190,10 @@ export const inventoryService = {
         ...(getMinAlertThreshold(data) !== undefined && {
           lowStockThreshold: getMinAlertThreshold(data),
         }),
-        ...(getUnitCost(data) !== undefined && {
-          unitCost: getUnitCost(data),
-          lastUnitCost: getUnitCost(data),
+        ...(unitCost !== undefined && {
+          unitCost,
+          lastUnitCost: unitCost,
+          costCurrency: shop?.currencySymbol || DEFAULT_COST_CURRENCY,
         }),
         ...(imageUrl !== undefined && { imageUrl }),
       },
@@ -162,55 +205,60 @@ export const inventoryService = {
   async delete(id: number, shopId: number) {
     await getExistingInventoryItem(id, shopId)
 
-    // Remove the item's adjustment history first: IngredientLog has a required FK
-    // to Ingredient with no cascade, so deleting an item that has any stock-in/out
-    // history would otherwise fail on the constraint.
-    await prisma.$transaction([
-      prisma.ingredientLog.deleteMany({ where: { ingredientId: id } }),
-      prisma.ingredient.delete({ where: { id } }),
-    ])
+    // Soft delete. IngredientLog is an immutable audit trail with a required FK
+    // to Ingredient, so a hard delete would mean destroying the item's entire
+    // stock history to satisfy the constraint. Stamping deletedAt hides the item
+    // from every read path while keeping its movements queryable.
+    await prisma.ingredient.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    })
   },
 
   async adjust(id: number, shopId: number, userId: number, data: AdjustInventoryItemInput) {
     return prisma.$transaction(async tx => {
-      const item = await tx.ingredient.findFirst({
-        where: { id, shopId },
-      })
+      // The weighted average is computed in application code from the row's
+      // current stock and cost, so a plain read would let two concurrent
+      // stock-ins both work from the pre-update snapshot: the increments would
+      // both land, but the later unitCost write would overwrite the earlier
+      // receipt's contribution. SELECT ... FOR UPDATE serialises them, so each
+      // adjustment reads the previous one's committed figures. The stock and
+      // cost are read *by the locking query itself* — a separate read afterwards
+      // could still be served from the transaction's snapshot.
+      const locked = await tx.$queryRaw<
+        { current_stock: string | number; unit_cost: string | number }[]
+      >`SELECT current_stock, unit_cost FROM ingredients WHERE id = ${id} AND shop_id = ${shopId} AND deleted_at IS NULL FOR UPDATE`
 
-      if (!item) {
+      if (locked.length === 0) {
         throw new AppError(Messages.NOT_FOUND, HttpStatus.NOT_FOUND)
       }
 
-      const changeAmount = data.change_amount
-      const oldStock = toNumber(item.currentStock)
-      const oldCost = toNumber(item.unitCost)
+      const changeAmount = toDecimal(data.change_amount)
+      const oldStock = toDecimal(locked[0].current_stock)
+      const oldCost = toDecimal(locked[0].unit_cost)
       // The cost recorded on the history row: for a stock-in it's the purchase
       // price (defaulting to the current cost when omitted); for a removal it's the
       // average cost consumed, so past spend/consumption can be reconstructed.
-      let historyUnitCost: number
+      let historyUnitCost: Prisma.Decimal
 
       if (data.adjustment_type === 'remove') {
-        const result = await tx.ingredient.updateMany({
-          where: {
-            id,
-            shopId,
-            currentStock: { gte: changeAmount },
-          },
+        if (oldStock.lessThan(changeAmount)) {
+          throw new AppError(Messages.INSUFFICIENT_STOCK, HttpStatus.BAD_REQUEST)
+        }
+
+        await tx.ingredient.update({
+          where: { id },
           data: {
             currentStock: { decrement: changeAmount },
           },
         })
 
-        if (result.count !== 1) {
-          throw new AppError(Messages.INSUFFICIENT_STOCK, HttpStatus.BAD_REQUEST)
-        }
-
         historyUnitCost = oldCost
       } else {
         // A stock-in requires a price; when the caller omits it we default to the
         // item's current cost, which leaves the weighted average unchanged.
-        const purchaseCost = data.unit_cost ?? oldCost
-        const weightedCost = round4(
+        const purchaseCost = data.unit_cost == null ? oldCost : toDecimal(data.unit_cost)
+        const weightedCost = roundCost(
           calculateWeightedAverageCost(oldStock, oldCost, changeAmount, purchaseCost)
         )
 
@@ -249,18 +297,18 @@ export const inventoryService = {
   // so the total reflects every item the shop holds.
   async getValuation(shopId: number) {
     const items = await prisma.ingredient.findMany({
-      where: { shopId },
+      where: { shopId, ...ACTIVE },
       select: { currentStock: true, unitCost: true },
     })
 
     const totalValue = items.reduce(
-      (sum, item) => sum + toNumber(item.currentStock) * toNumber(item.unitCost),
-      0
+      (sum, item) => sum.plus(toDecimal(item.currentStock).times(toDecimal(item.unitCost))),
+      toDecimal(0)
     )
 
     return {
       totalItems: items.length,
-      totalValue: round2(totalValue),
+      totalValue: roundMoney(totalValue).toNumber(),
     }
   },
 
@@ -311,8 +359,8 @@ export const inventoryService = {
       items: logs.map(log => ({
         id: log.id,
         type: log.transactionType,
-        quantityChanged: toNumber(log.quantityChanged),
-        unitCost: log.unitCost === null ? null : toNumber(log.unitCost),
+        quantityChanged: serialize(log.quantityChanged),
+        unitCost: log.unitCost === null ? null : serialize(log.unitCost),
         notes: log.reason,
         user: log.user?.name ?? null,
         userRole: log.user?.roles[0]?.role.name ?? null,
@@ -325,8 +373,8 @@ export const inventoryService = {
         totalPages: Math.max(1, Math.ceil(total / limit)),
       },
       totals: {
-        totalIn: toNumber(addsSum._sum.quantityChanged ?? 0),
-        totalOut: toNumber(removesSum._sum.quantityChanged ?? 0),
+        totalIn: serialize(addsSum._sum.quantityChanged ?? 0),
+        totalOut: serialize(removesSum._sum.quantityChanged ?? 0),
       },
     }
   },
