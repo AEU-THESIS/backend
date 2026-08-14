@@ -40,7 +40,10 @@ const inventoryItemBaseSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   unitOfMeasure: z.string().trim().min(1, 'Unit of measure is required').optional(),
   unit_of_measure: z.string().trim().min(1, 'Unit of measure is required').optional(),
-  quantity: nonNegativeDecimal.default(0),
+  // No `.default(0)` here: `.partial()` does not strip a default, so an update
+  // that omits `quantity` would still parse to 0 and reset the item's stock.
+  // The opening-stock default belongs to create alone (applied below).
+  quantity: nonNegativeDecimal.optional(),
   minAlertThreshold: nonNegativeDecimal.optional(),
   min_alert_threshold: nonNegativeDecimal.optional(),
   // Cost price per unit (shop base currency). Optional — the user "can" record it.
@@ -94,7 +97,9 @@ const validateAliasPairs = (data: InventoryItemAliasInput, ctx: z.RefinementCtx)
   }
 }
 
-export const createInventoryItemSchema = inventoryItemBaseSchema.superRefine(validateAliasPairs)
+export const createInventoryItemSchema = inventoryItemBaseSchema
+  .extend({ quantity: nonNegativeDecimal.default(0) })
+  .superRefine(validateAliasPairs)
 
 export const updateInventoryItemSchema = inventoryItemBaseSchema
   .partial()
@@ -124,13 +129,19 @@ export const inventoryQuerySchema = z.object({
 // the service, so they are validated strictly here: an unparseable string would
 // otherwise become an Invalid Date and silently widen the filter, and an
 // inverted range would return an empty page that reads as "no activity".
+// Swagger documents both as `{ type: string, format: date-time }` — RFC 3339 —
+// so a numeric offset is as valid as `Z`, but a date-only value is not. Piped
+// rather than chained so the trim happens before the format check.
 const isoDateTime = z
   .string()
   .trim()
-  .refine(value => !Number.isNaN(Date.parse(value)), 'Must be an ISO 8601 date-time')
+  .pipe(z.iso.datetime({ offset: true, error: 'Must be an ISO 8601 date-time' }))
 
+// strictObject: an unrecognised query key is a caller mistake (a typo like
+// `?form=` would otherwise be dropped in silence and return the unfiltered
+// range as though the filter had applied).
 export const inventoryHistoryQuerySchema = z
-  .object({
+  .strictObject({
     from: isoDateTime.optional(),
     to: isoDateTime.optional(),
     page: z.coerce.number().int().positive().default(1),
