@@ -134,3 +134,27 @@ export const cartDiscounts = (
   const total = round2(applied.reduce((sum, a) => sum + a.discount, 0))
   return { total, applied }
 }
+
+export interface SurvivorMoney {
+  subtotal: number // sum of surviving line subtotals (pre-discount)
+  discountAmount: number // discount recomputed over the survivors
+  netTotal: number // max(0, subtotal − discountAmount)
+  applied: AppliedPromotion[] // promotions that still apply after cancellation
+}
+
+/**
+ * Recomputes an order's money after one or more lines were cancelled. It sums the
+ * surviving lines and RE-RUNS the promotion engine over them via `cartDiscounts`,
+ * so a promotion whose qualifying item was removed is dropped entirely (e.g. a
+ * "Buy 1 Get 1" that no longer has a pair), never merely subtracted. Pure — no DB
+ * and no currency conversion — which is what makes it directly unit-testable.
+ */
+export const recalcSurvivorMoney = (
+  promos: PromotionForCalc[],
+  survivingLines: CartLineForCalc[]
+): SurvivorMoney => {
+  const subtotal = round2(survivingLines.reduce((sum, line) => sum + line.subtotal, 0))
+  const { total: discountAmount, applied } = cartDiscounts(promos, survivingLines)
+  const netTotal = Math.max(0, round2(subtotal - discountAmount))
+  return { subtotal, discountAmount, netTotal, applied }
+}

@@ -27,6 +27,29 @@ enum OptionSetType {
   custom
 }
 
+// Money/fulfillment lifecycle states. Kept as DB enums so an invalid status can
+// never be written (the app is the only writer, but the DB is the last guard).
+enum OrderPaymentStatus {
+  paid
+  unpaid
+  refunded
+  partially_refunded
+}
+
+enum OrderFulfillmentStatus {
+  preparing
+  ready
+  completed
+  canceled
+}
+
+enum TransactionStatus {
+  pending
+  completed
+  failed
+  refunded
+}
+
 // ==========================================
 // CORE: SHOP
 // ==========================================
@@ -87,7 +110,9 @@ model User {
   roles                   RoleUser[]
   ingredientLogs          IngredientLog[]
   variationGroupTemplates VariationGroupTemplate[]
-  orders                  Order[]
+  orders                  Order[]                  @relation("OrderCreatedBy")
+  voidedOrders            Order[]                  @relation("OrderVoidedBy")
+  transactions            Transaction[]
   personalTokens          PersonalAccessToken[]
 
   @@unique([email, isDeleted], map: "users_email_is_deleted_key")
@@ -476,14 +501,21 @@ model Order {
   paymentMethod String  @map("payment_method")
   khqrString    String? @map("khqr_string") @db.Text
 
-  paymentStatus     String @map("payment_status")
-  fulfillmentStatus String @map("fulfillment_status")
+  paymentStatus     OrderPaymentStatus     @map("payment_status")
+  fulfillmentStatus OrderFulfillmentStatus @map("fulfillment_status")
+
+  // Void audit: who reversed the whole order, when, and why. Set only when an
+  // order is voided (paymentStatus -> refunded, fulfillmentStatus -> canceled).
+  voidedAt       DateTime? @map("voided_at")
+  voidedByUserId Int?      @map("voided_by_user_id")
+  voidReason     String?   @map("void_reason") @db.Text
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   shop              Shop             @relation(fields: [shopId], references: [id])
-  user              User?            @relation(fields: [userId], references: [id])
+  user              User?            @relation("OrderCreatedBy", fields: [userId], references: [id])
+  voidedBy          User?            @relation("OrderVoidedBy", fields: [voidedByUserId], references: [id])
   tableSession      TableSession?    @relation(fields: [tableSessionId], references: [id])
   promotion         Promotion?       @relation(fields: [promotionId], references: [id])
   items             OrderItem[]
@@ -521,6 +553,12 @@ model OrderItem {
   extraPrice Decimal @default(0.00) @map("extra_price") @db.Decimal(10, 2)
   subtotal   Decimal @db.Decimal(10, 2)
 
+  // Item cancellation (whole-line). canceledQuantity mirrors quantity when
+  // cancelled; the row is kept (struck through in the UI), never deleted, so the
+  // order still shows what was originally ordered.
+  canceledAt       DateTime? @map("canceled_at")
+  canceledQuantity Int       @default(0) @map("canceled_quantity")
+
   order   Order             @relation(fields: [orderId], references: [id])
   product Product           @relation(fields: [productId], references: [id])
   options OrderItemOption[]
@@ -541,18 +579,21 @@ model OrderItemOption {
 }
 
 model Transaction {
-  id            Int       @id @default(autoincrement())
-  orderId       Int       @map("order_id")
-  khqrString    String?   @map("khqr_string") @db.Text
-  md5Hash       String?   @map("md5_hash")
-  paymentMethod String    @map("payment_method")
-  amount        Decimal   @db.Decimal(10, 2)
+  id            Int               @id @default(autoincrement())
+  orderId       Int               @map("order_id")
+  userId        Int?              @map("user_id")
+  khqrString    String?           @map("khqr_string") @db.Text
+  md5Hash       String?           @map("md5_hash")
+  paymentMethod String            @map("payment_method")
+  // Signed amount in `currency`: positive for a payment, negative for a refund.
+  amount        Decimal           @db.Decimal(10, 2)
   currency      String
   payload       Json?
-  status        String
-  verifiedAt    DateTime? @map("verified_at")
+  status        TransactionStatus
+  verifiedAt    DateTime?         @map("verified_at")
 
   order Order @relation(fields: [orderId], references: [id])
+  user  User? @relation(fields: [userId], references: [id])
 
   @@index([orderId])
   @@map("transactions")

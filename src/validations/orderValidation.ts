@@ -43,9 +43,27 @@ export const CreateOrderSchema = z
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>
 
+// payment_status / fulfillment_status are DB enums now, so an unknown value in the
+// filter would throw a Prisma validation error (500). Validate them here → clean 400.
+const FULFILLMENT_STATUSES = ['preparing', 'ready', 'completed', 'canceled'] as const
+const PAYMENT_STATUSES = ['paid', 'unpaid', 'refunded', 'partially_refunded'] as const
+
 export const GetOrdersQuerySchema = z.object({
-  status: z.string().optional(),
-  paymentStatus: z.string().optional(),
+  status: z.enum(FULFILLMENT_STATUSES).optional(),
+  // One value, or a comma-separated subset (e.g. "paid,partially_refunded"); every
+  // token must be a known payment status.
+  paymentStatus: z
+    .string()
+    .optional()
+    .refine(
+      value =>
+        value === undefined ||
+        value
+          .split(',')
+          .map(s => s.trim())
+          .every(s => (PAYMENT_STATUSES as readonly string[]).includes(s)),
+      { message: 'Invalid payment status filter' }
+    ),
   paymentMethod: z.enum(['cash', 'khqr']).optional(),
   date: z.string().optional(),
   search: z.string().optional(),
@@ -69,3 +87,18 @@ export const UpdateOrderStatusSchema = z.object({
 })
 
 export type UpdateOrderStatusInput = z.infer<typeof UpdateOrderStatusSchema>
+
+// Whole-order void: an optional free-text reason the manager can record.
+export const VoidOrderSchema = z.object({
+  reason: z.string().trim().max(255).optional(),
+})
+
+export type VoidOrderInput = z.infer<typeof VoidOrderSchema>
+
+// Route params for cancelling a single line item on an order.
+export const CancelOrderItemParamsSchema = z.object({
+  id: z.coerce.number().int().positive('Invalid order ID'),
+  itemId: z.coerce.number().int().positive('Invalid item ID'),
+})
+
+export type CancelOrderItemParamsInput = z.infer<typeof CancelOrderItemParamsSchema>

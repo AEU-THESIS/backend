@@ -45,6 +45,12 @@ export const Messages = {
     'One or more items have an invalid price (a size or option must be selected)',
   INVALID_EXCHANGE_RATE: 'Shop exchange rate is invalid; please update it in Shop Settings',
   ORDERS_RETRIEVED: 'Orders retrieved successfully',
+  // Void & item cancellation
+  ORDER_VOIDED: 'Order voided and payment refunded',
+  ORDER_ITEM_CANCELED: 'Item cancelled and order recalculated',
+  ORDER_ALREADY_VOIDED: 'This order has already been voided',
+  ORDER_ITEM_NOT_FOUND: 'Order item not found for this order',
+  ORDER_ITEM_ALREADY_CANCELED: 'This item has already been cancelled',
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',

@@ -13,6 +13,8 @@ import {
   GetOrdersQuerySchema,
   GetOrderParamsSchema,
   UpdateOrderStatusSchema,
+  VoidOrderSchema,
+  CancelOrderItemParamsSchema,
 } from '../validations/orderValidation'
 import { AppError } from '../utils/appError'
 import { orderSseController } from './orderSseController'
@@ -96,5 +98,47 @@ export const orderController = {
     orderSseController.safeBroadcastToShop(shopId, 'order_updated', updatedOrder)
 
     return sendSuccess(res, updatedOrder, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
+  }),
+
+  void: catchAsync(async (req: Request, res: Response) => {
+    const userId = req.user!.user_id
+    const shopId = req.user!.shop_id
+
+    const params = GetOrderParamsSchema.safeParse(req.params)
+    if (!params.success) {
+      throw new AppError(Messages.INVALID_ORDER_ID, HttpStatus.BAD_REQUEST)
+    }
+    const body = VoidOrderSchema.safeParse(req.body ?? {})
+    if (!body.success) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
+    const order = await orderService.voidOrder(shopId, params.data.id, userId, body.data.reason)
+
+    // Push the reversed order to every connected screen so boards/history refresh live.
+    orderSseController.safeBroadcastToShop(shopId, 'order_updated', order)
+
+    return sendSuccess(res, order, Messages.ORDER_VOIDED, HttpStatus.OK)
+  }),
+
+  cancelItem: catchAsync(async (req: Request, res: Response) => {
+    const userId = req.user!.user_id
+    const shopId = req.user!.shop_id
+
+    const params = CancelOrderItemParamsSchema.safeParse(req.params)
+    if (!params.success) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
+    const order = await orderService.cancelOrderItem(
+      shopId,
+      params.data.id,
+      params.data.itemId,
+      userId
+    )
+
+    orderSseController.safeBroadcastToShop(shopId, 'order_updated', order)
+
+    return sendSuccess(res, order, Messages.ORDER_ITEM_CANCELED, HttpStatus.OK)
   }),
 }
