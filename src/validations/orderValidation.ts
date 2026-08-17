@@ -43,9 +43,27 @@ export const CreateOrderSchema = z
 
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>
 
+// payment_status / fulfillment_status are DB enums now, so an unknown value in the
+// filter would throw a Prisma validation error (500). Validate them here → clean 400.
+const FULFILLMENT_STATUSES = ['preparing', 'ready', 'completed', 'canceled'] as const
+const PAYMENT_STATUSES = ['paid', 'unpaid', 'refunded', 'partially_refunded'] as const
+
 export const GetOrdersQuerySchema = z.object({
-  status: z.string().optional(),
-  paymentStatus: z.string().optional(),
+  status: z.enum(FULFILLMENT_STATUSES).optional(),
+  // One value, or a comma-separated subset (e.g. "paid,partially_refunded"); every
+  // token must be a known payment status.
+  paymentStatus: z
+    .string()
+    .optional()
+    .refine(
+      value =>
+        value === undefined ||
+        value
+          .split(',')
+          .map(s => s.trim())
+          .every(s => (PAYMENT_STATUSES as readonly string[]).includes(s)),
+      { message: 'Invalid payment status filter' }
+    ),
   paymentMethod: z.enum(['cash', 'khqr']).optional(),
   date: z.string().optional(),
   search: z.string().optional(),
