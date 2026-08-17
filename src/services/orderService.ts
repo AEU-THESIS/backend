@@ -629,9 +629,19 @@ export const orderService = {
       whereClause.fulfillmentStatus = status
     }
 
-    // Payment status filter (paid, unpaid)
+    // Payment status filter. Accepts a comma-separated list (e.g.
+    // "paid,partially_refunded") so the sales report can include partially-refunded
+    // orders alongside paid ones; a single value still filters exactly (Order History).
     if (paymentStatus) {
-      whereClause.paymentStatus = paymentStatus
+      const statuses = paymentStatus
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+      if (statuses.length === 1) {
+        whereClause.paymentStatus = statuses[0]
+      } else if (statuses.length > 1) {
+        whereClause.paymentStatus = { in: statuses }
+      }
     }
 
     // Date filters. createdAt is stored in UTC, so day windows are computed
