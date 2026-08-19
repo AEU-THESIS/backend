@@ -34,6 +34,10 @@ enum OrderPaymentStatus {
   unpaid
   refunded
   partially_refunded
+  // Fully complimentary order (total = 0 because every charged line was redeemed
+  // free, e.g. a loyalty-stamp reward). Excluded from paid-only sales queries so it
+  // records no phantom revenue.
+  comp
 }
 
 enum OrderFulfillmentStatus {
@@ -552,6 +556,13 @@ model OrderItem {
   price      Decimal @db.Decimal(10, 2)
   extraPrice Decimal @default(0.00) @map("extra_price") @db.Decimal(10, 2)
   subtotal   Decimal @db.Decimal(10, 2)
+
+  // Complimentary line (e.g. a loyalty-stamp "buy 10 get 1 free" redemption). A comp
+  // line is persisted with subtotal = 0 so it adds no revenue to any report, while
+  // price/extraPrice are kept so the receipt can still show its normal (struck) price.
+  // compReason records why it was given free — a permanent audit trail on the order.
+  isComplimentary Boolean @default(false) @map("is_complimentary")
+  compReason      String? @map("comp_reason")
 
   // Item cancellation (whole-line). canceledQuantity mirrors quantity when
   // cancelled; the row is kept (struck through in the UI), never deleted, so the
