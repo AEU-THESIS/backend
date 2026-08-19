@@ -332,6 +332,8 @@ export const orderService = {
       basePrice: number
       optionsExtra: number
       subtotal: number
+      isComplimentary: boolean
+      compReason: string | null
       validatedOptions: Array<{
         groupName: string
         optionName: string
@@ -394,11 +396,16 @@ export const orderService = {
           throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
         }
       }
+      // A comp line still points at a real, priced product (its price is kept for the
+      // receipt), so the price guard applies to it too — only its subtotal is zeroed.
       if (basePrice + optionsExtra <= 0) {
         throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
       }
 
-      const subtotal = (basePrice + optionsExtra) * item.quantity
+      // Complimentary line → subtotal 0, contributing no revenue anywhere. Kept out of
+      // serverTotal (and, below, out of the promotion cart — a free line isn't discounted).
+      const isComplimentary = item.isComplimentary === true
+      const subtotal = isComplimentary ? 0 : (basePrice + optionsExtra) * item.quantity
       serverTotal += subtotal
 
       validatedItemsList.push({
@@ -407,6 +414,10 @@ export const orderService = {
         basePrice,
         optionsExtra,
         subtotal,
+        isComplimentary,
+        // Persist a reason for every comp line (audit trail); default to the only
+        // current redemption type so the field is never empty.
+        compReason: isComplimentary ? item.compReason?.trim() || 'loyalty stamp' : null,
         validatedOptions,
       })
     }
@@ -416,13 +427,15 @@ export const orderService = {
     // Independently fetch the shop's active promotions and recompute the discount
     // here — never trust a client-supplied discount. At most one promotion applies
     // (the largest-discount match). serverTotal is the pre-discount subtotal.
-    const cartLines: CartLineForCalc[] = validatedItemsList.map(v => ({
-      productId: v.productId,
-      categoryId: productMap.get(v.productId)!.categoryId,
-      quantity: v.quantity,
-      unitPrice: v.basePrice + v.optionsExtra,
-      subtotal: v.subtotal,
-    }))
+    const cartLines: CartLineForCalc[] = validatedItemsList
+      .filter(v => !v.isComplimentary)
+      .map(v => ({
+        productId: v.productId,
+        categoryId: productMap.get(v.productId)!.categoryId,
+        quantity: v.quantity,
+        unitPrice: v.basePrice + v.optionsExtra,
+        subtotal: v.subtotal,
+      }))
     const activePromotions = await promotionService.getActiveByShop(shopId)
     const { total: discountAmount, applied } = cartDiscounts(activePromotions, cartLines)
     const appliedPromotionIds = applied.map(a => a.promotion.id)
@@ -434,6 +447,14 @@ export const orderService = {
       : null
     // Never let stacked/fixed-amount discounts push the charge below zero.
     const netTotal = Math.max(0, Math.round((serverTotal - discountAmount) * 100) / 100)
+
+    // A fully-complimentary order (every line redeemed free) collects no money: it is
+    // recorded as `comp` and skips the payment/change flow entirely. The condition is
+    // "every line is complimentary" (which inherently makes netTotal 0) rather than
+    // "netTotal === 0" — so an order that merely happens to reach 0 via a 100%-off
+    // promotion, or a mixed order with a fully-discounted real line, stays a $0 `paid`
+    // sale and keeps appearing in sales reports.
+    const isFullyComp = validatedItemsList.every(v => v.isComplimentary)
 
     // ── 3. Resolve the authoritative exchange rate & payment amounts ──────
     // The exchange rate is read from the shop record (Shop Settings), never
@@ -462,20 +483,28 @@ export const orderService = {
     const totalInPaymentCurrency =
       paymentCurrency === 'KHR' ? roundRielUp(netTotal * exchangeRate) : round2(netTotal)
 
-    if (receivedAmount < totalInPaymentCurrency) {
+    // A fully-comp order is nil-value: nothing is tendered, so the insufficient-payment
+    // guard is skipped and the received amount is forced to 0 (no change is due).
+    const effectiveReceived = isFullyComp ? 0 : receivedAmount
+
+    if (!isFullyComp && effectiveReceived < totalInPaymentCurrency) {
       throw new AppError(Messages.INSUFFICIENT_PAYMENT, HttpStatus.BAD_REQUEST)
     }
 
     // ── 4. Calculate change & normalise the received amount to USD ────────
     // Change is rounded DOWN to the nearest 100៛ for riel so only payable notes
     // are returned. receivedAmountUsd lets reports sum every sale in one currency.
-    const changeAmount =
-      paymentCurrency === 'KHR'
-        ? roundRielDown(receivedAmount - totalInPaymentCurrency)
-        : round2(receivedAmount - totalInPaymentCurrency)
+    const changeAmount = isFullyComp
+      ? 0
+      : paymentCurrency === 'KHR'
+        ? roundRielDown(effectiveReceived - totalInPaymentCurrency)
+        : round2(effectiveReceived - totalInPaymentCurrency)
 
-    const receivedAmountUsd =
-      paymentCurrency === 'KHR' ? round2(receivedAmount / exchangeRate) : round2(receivedAmount)
+    const receivedAmountUsd = isFullyComp
+      ? 0
+      : paymentCurrency === 'KHR'
+        ? round2(effectiveReceived / exchangeRate)
+        : round2(effectiveReceived)
 
     // ── 6. Atomic transaction: Order + Items + Options + Inventory ────
     // Retried on a duplicate order number (P2002) so a collision never reaches
@@ -516,7 +545,7 @@ export const orderService = {
             totalAmount: netTotal,
             discountAmount,
             promotionId: effectivePromotionId,
-            receivedAmount,
+            receivedAmount: effectiveReceived,
             receivedAmountUsd,
             changeAmount,
             paymentCurrency,
@@ -524,7 +553,10 @@ export const orderService = {
             // exactly even if the shop later changes its exchange rate.
             exchangeRateSnapshot: exchangeRate,
             paymentMethod,
-            paymentStatus: 'paid',
+            // A fully-comp order is `comp` (excluded from paid-only sales queries);
+            // otherwise it is a normal paid sale — a mixed order (paid + comp lines)
+            // still charges for the paid items and stays `paid`.
+            paymentStatus: isFullyComp ? 'comp' : 'paid',
             fulfillmentStatus,
           },
         })
@@ -557,6 +589,8 @@ export const orderService = {
               price: valItem.basePrice,
               extraPrice: valItem.optionsExtra,
               subtotal: valItem.subtotal,
+              isComplimentary: valItem.isComplimentary,
+              compReason: valItem.compReason,
             },
           })
 
@@ -586,7 +620,7 @@ export const orderService = {
       // not the pre-transaction candidate.
       promotionId: order.promotionId,
       totalAmount: netTotal,
-      receivedAmount,
+      receivedAmount: effectiveReceived,
       receivedAmountUsd,
       paymentCurrency,
       changeAmount,
@@ -601,6 +635,7 @@ export const orderService = {
     filters: {
       status?: string
       paymentStatus?: string
+      hasComp?: boolean
       date?: string
       search?: string
       startDate?: string
@@ -612,6 +647,7 @@ export const orderService = {
     const {
       status,
       paymentStatus,
+      hasComp,
       date,
       search,
       startDate,
@@ -647,6 +683,12 @@ export const orderService = {
     // Status filter (preparing, ready, completed, canceled)
     if (status) {
       whereClause.fulfillmentStatus = status
+    }
+
+    // "Free items only" reconciliation filter — restrict to orders carrying at least
+    // one complimentary line so the admin can count loyalty-stamp redemptions.
+    if (hasComp) {
+      whereClause.items = { some: { isComplimentary: true } }
     }
 
     // Payment status filter. Accepts a comma-separated list (e.g.
