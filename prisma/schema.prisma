@@ -16,44 +16,78 @@ enum ProductType {
   drink
   food
 }
+
 enum PriceMode {
   fixed
   by_size
 }
+
 enum OptionSetType {
   size
   custom
+}
+
+// Money/fulfillment lifecycle states. Kept as DB enums so an invalid status can
+// never be written (the app is the only writer, but the DB is the last guard).
+enum OrderPaymentStatus {
+  paid
+  unpaid
+  refunded
+  partially_refunded
+  // Fully complimentary order (total = 0 because every charged line was redeemed
+  // free, e.g. a loyalty-stamp reward). Excluded from paid-only sales queries so it
+  // records no phantom revenue.
+  comp
+}
+
+enum OrderFulfillmentStatus {
+  // A customer pre-order awaiting staff acceptance; not yet in the kitchen flow.
+  pending
+  preparing
+  ready
+  completed
+  canceled
+  // A customer pre-order the staff declined (distinct from a voided/canceled sale).
+  rejected
+}
+
+enum TransactionStatus {
+  pending
+  completed
+  failed
+  refunded
 }
 
 // ==========================================
 // CORE: SHOP
 // ==========================================
 model Shop {
-  id              Int      @id @default(autoincrement())
-  name            String
-  slug            String   @unique
-  ownerName       String?  @map("owner_name")
-  phone           String?
-  address         String?  @db.Text
-  bakongAccountId String?  @map("bakong_account_id")
-  currencySymbol  String   @default("$") @map("currency_symbol")
-  exchangeRate    Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
-  receiptFooter   String?  @map("receipt_footer") @db.Text
-  isOrderManagementEnabled Boolean @default(true) @map("is_order_management_enabled")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                       Int      @id @default(autoincrement())
+  name                     String
+  slug                     String   @unique
+  ownerName                String?  @map("owner_name")
+  phone                    String?
+  address                  String?  @db.Text
+  bakongAccountId          String?  @map("bakong_account_id")
+  currencySymbol           String   @default("$") @map("currency_symbol")
+  exchangeRate             Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
+  receiptFooter            String?  @map("receipt_footer") @db.Text
+  isOrderManagementEnabled Boolean  @default(true) @map("is_order_management_enabled")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
-  users          User[]
-  roles          Role[]
-  categories     Category[]
-  products       Product[]
-  optionSets     OptionSet[]
-  variationGroupTemplates VariationGroupTemplate[]
-  promotions     Promotion[]
-  ingredients    Ingredient[]
-  notifications  Notification[]
-  shopTables     ShopTable[]
-  orders         Order[]
+  users                    User[]
+  roles                    Role[]
+  categories               Category[]
+  products                 Product[]
+  optionSets               OptionSet[]
+  variationGroupTemplates  VariationGroupTemplate[]
+  promotions               Promotion[]
+  ingredients              Ingredient[]
+  notifications            Notification[]
+  shopTables               ShopTable[]
+  orders                   Order[]
+  blockedTelegramCustomers BlockedTelegramCustomer[]
 
   @@map("shops")
 }
@@ -81,12 +115,14 @@ model User {
   deletedAt     DateTime? @map("deleted_at")
   isDeleted     Boolean   @default(false) @map("is_deleted")
 
-  shop           Shop                  @relation(fields: [shopId], references: [id])
-  roles          RoleUser[]
-  ingredientLogs IngredientLog[]
+  shop                    Shop                     @relation(fields: [shopId], references: [id])
+  roles                   RoleUser[]
+  ingredientLogs          IngredientLog[]
   variationGroupTemplates VariationGroupTemplate[]
-  orders         Order[]
-  personalTokens PersonalAccessToken[]
+  orders                  Order[]                  @relation("OrderCreatedBy")
+  voidedOrders            Order[]                  @relation("OrderVoidedBy")
+  transactions            Transaction[]
+  personalTokens          PersonalAccessToken[]
 
   @@unique([email, isDeleted], map: "users_email_is_deleted_key")
   @@unique([employeeId, isDeleted], map: "users_employee_id_is_deleted_key")
@@ -177,9 +213,10 @@ model Category {
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
 
-  shop       Shop                @relation(fields: [shopId], references: [id])
-  products   Product[]
-  promotions PromotionCategory[]
+  shop        Shop                @relation(fields: [shopId], references: [id])
+  products    Product[]
+  promotions  PromotionCategory[]
+  ingredients Ingredient[]
 
   @@map("categories")
 }
@@ -209,11 +246,11 @@ model Product {
 }
 
 model OptionSet {
-  id        Int      @id @default(autoincrement())
-  shopId    Int      @map("shop_id")
+  id        Int           @id @default(autoincrement())
+  shopId    Int           @map("shop_id")
   name      String
   type      OptionSetType @map("type")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime      @default(now()) @map("created_at")
 
   shop     Shop               @relation(fields: [shopId], references: [id])
   elements OptionSetElement[]
@@ -337,19 +374,36 @@ model PromotionProduct {
 // CAFE INVENTORY (RECIPES & INGREDIENTS)
 // ==========================================
 model Ingredient {
-  id                Int      @id @default(autoincrement())
-  shopId            Int      @map("shop_id")
+  id                Int       @id @default(autoincrement())
+  shopId            Int       @map("shop_id")
+  categoryId        Int?      @map("category_id")
   name              String
-  unitOfMeasure     String   @map("unit_of_measure")
-  currentStock      Decimal  @default(0.00) @map("current_stock") @db.Decimal(10, 2)
-  lowStockThreshold Decimal  @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
-  imageUrl          String?  @map("image_url") @db.LongText
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  unitOfMeasure     String    @map("unit_of_measure")
+  currentStock      Decimal   @default(0.00) @map("current_stock") @db.Decimal(10, 2)
+  lowStockThreshold Decimal   @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
+  // Weighted-average cost per unit. 4 dp (not 2) so small per-unit costs — e.g.
+  // coffee at $18/kg = $0.018/g — aren't rounded to zero.
+  unitCost          Decimal   @default(0.0000) @map("unit_cost") @db.Decimal(12, 4)
+  // Most recent purchase price per unit (the price from the last stock-in).
+  lastUnitCost      Decimal   @default(0.0000) @map("last_unit_cost") @db.Decimal(12, 4)
+  // Currency the cost figures are recorded in (the shop's configured currency).
+  // Currency the cost figures are recorded in. No default: it is always derived
+  // from the owning Shop's currencySymbol, so a blanket '$' here would silently
+  // mislabel local-currency costs.
+  costCurrency      String    @map("cost_currency")
+  imageUrl          String?   @map("image_url") @db.LongText
+  // Soft delete. IngredientLog rows are an immutable audit trail, so removing an
+  // item hides it from the catalogue rather than destroying its stock history.
+  deletedAt         DateTime? @map("deleted_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  shop    Shop            @relation(fields: [shopId], references: [id])
-  recipes ProductRecipe[]
-  logs    IngredientLog[]
+  shop     Shop            @relation(fields: [shopId], references: [id])
+  category Category?       @relation(fields: [categoryId], references: [id])
+  recipes  ProductRecipe[]
+  logs     IngredientLog[]
 
+  @@index([shopId, deletedAt])
+  @@index([categoryId])
   @@map("ingredients")
 }
 
@@ -371,6 +425,9 @@ model IngredientLog {
   userId          Int      @map("user_id")
   transactionType String   @map("transaction_type")
   quantityChanged Decimal  @map("quantity_changed") @db.Decimal(10, 2)
+  // Purchase price per unit at the moment of a stock-in (USD base). Null for
+  // removals. Captures cost history so past spend can be reconstructed later.
+  unitCost        Decimal? @map("unit_cost") @db.Decimal(12, 4)
   reason          String?
   createdAt       DateTime @default(now()) @map("created_at")
 
@@ -454,27 +511,49 @@ model Order {
   orderNumber String @unique @map("order_number")
   orderType   String @map("order_type")
 
-  customerName    String? @map("customer_name")
-  customerPhone   String? @map("customer_phone")
-  deliveryAddress String? @map("delivery_address") @db.Text
+  customerName     String?  @map("customer_name")
+  customerPhone    String?  @map("customer_phone")
+  deliveryAddress  String?  @map("delivery_address") @db.Text
+  // Customer-shared GPS coordinates for a delivery pre-order. Stored as-is (no
+  // reverse-geocoding); staff open a Google Maps link built from these.
+  deliveryLat      Decimal? @map("delivery_lat") @db.Decimal(10, 7)
+  deliveryLng      Decimal? @map("delivery_lng") @db.Decimal(10, 7)
+  // Telegram identity of the guest who placed a Mini App pre-order (verified via
+  // initData). Null for staff-created POS orders.
+  telegramUserId   String?  @map("telegram_user_id")
+  telegramUsername String?  @map("telegram_username")
 
   totalAmount          Decimal @map("total_amount") @db.Decimal(10, 2)
   discountAmount       Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
   receivedAmount       Decimal @map("received_amount") @db.Decimal(10, 2)
+  // Received amount normalised to USD (receivedAmount holds the native payment
+  // currency — riel for KHR payments, dollars for USD). Powers currency-agnostic
+  // reporting so a mixed-currency day can be summed in a single column.
+  receivedAmountUsd    Decimal @default(0.00) @map("received_amount_usd") @db.Decimal(10, 2)
+  // Change returned to the customer, in the payment currency (note-rounded for KHR).
+  changeAmount         Decimal @default(0.00) @map("change_amount") @db.Decimal(10, 2)
   paymentCurrency      String  @map("payment_currency")
+  // Snapshot of the shop's exchange rate at checkout (server-authoritative).
   exchangeRateSnapshot Decimal @map("exchange_rate_snapshot") @db.Decimal(10, 2)
 
   paymentMethod String  @map("payment_method")
   khqrString    String? @map("khqr_string") @db.Text
 
-  paymentStatus     String @map("payment_status")
-  fulfillmentStatus String @map("fulfillment_status")
+  paymentStatus     OrderPaymentStatus     @map("payment_status")
+  fulfillmentStatus OrderFulfillmentStatus @map("fulfillment_status")
+
+  // Void audit: who reversed the whole order, when, and why. Set only when an
+  // order is voided (paymentStatus -> refunded, fulfillmentStatus -> canceled).
+  voidedAt       DateTime? @map("voided_at")
+  voidedByUserId Int?      @map("voided_by_user_id")
+  voidReason     String?   @map("void_reason") @db.Text
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   shop              Shop             @relation(fields: [shopId], references: [id])
-  user              User?            @relation(fields: [userId], references: [id])
+  user              User?            @relation("OrderCreatedBy", fields: [userId], references: [id])
+  voidedBy          User?            @relation("OrderVoidedBy", fields: [voidedByUserId], references: [id])
   tableSession      TableSession?    @relation(fields: [tableSessionId], references: [id])
   promotion         Promotion?       @relation(fields: [promotionId], references: [id])
   items             OrderItem[]
@@ -512,6 +591,19 @@ model OrderItem {
   extraPrice Decimal @default(0.00) @map("extra_price") @db.Decimal(10, 2)
   subtotal   Decimal @db.Decimal(10, 2)
 
+  // Complimentary line (e.g. a loyalty-stamp "buy 10 get 1 free" redemption). A comp
+  // line is persisted with subtotal = 0 so it adds no revenue to any report, while
+  // price/extraPrice are kept so the receipt can still show its normal (struck) price.
+  // compReason records why it was given free — a permanent audit trail on the order.
+  isComplimentary Boolean @default(false) @map("is_complimentary")
+  compReason      String? @map("comp_reason")
+
+  // Item cancellation (whole-line). canceledQuantity mirrors quantity when
+  // cancelled; the row is kept (struck through in the UI), never deleted, so the
+  // order still shows what was originally ordered.
+  canceledAt       DateTime? @map("canceled_at")
+  canceledQuantity Int       @default(0) @map("canceled_quantity")
+
   order   Order             @relation(fields: [orderId], references: [id])
   product Product           @relation(fields: [productId], references: [id])
   options OrderItemOption[]
@@ -532,19 +624,44 @@ model OrderItemOption {
 }
 
 model Transaction {
-  id            Int       @id @default(autoincrement())
-  orderId       Int       @map("order_id")
-  khqrString    String?   @map("khqr_string") @db.Text
-  md5Hash       String?   @map("md5_hash")
-  paymentMethod String    @map("payment_method")
-  amount        Decimal   @db.Decimal(10, 2)
+  id            Int               @id @default(autoincrement())
+  orderId       Int               @map("order_id")
+  userId        Int?              @map("user_id")
+  khqrString    String?           @map("khqr_string") @db.Text
+  md5Hash       String?           @map("md5_hash")
+  paymentMethod String            @map("payment_method")
+  // Signed amount in `currency`: positive for a payment, negative for a refund.
+  amount        Decimal           @db.Decimal(10, 2)
   currency      String
   payload       Json?
-  status        String
-  verifiedAt    DateTime? @map("verified_at")
+  status        TransactionStatus
+  verifiedAt    DateTime?         @map("verified_at")
 
   order Order @relation(fields: [orderId], references: [id])
+  user  User? @relation(fields: [userId], references: [id])
 
   @@index([orderId])
   @@map("transactions")
+}
+
+// Temporary block-list for abusive Telegram guests. A staff member taps "Block"
+// on the group notification; further Mini App pre-orders from this telegramUserId
+// are rejected until `blockedUntil`. Temporary by design so a mistaken block
+// self-resolves — there is no permanent ban.
+model BlockedTelegramCustomer {
+  id               Int       @id @default(autoincrement())
+  shopId           Int       @map("shop_id")
+  telegramUserId   String    @map("telegram_user_id")
+  telegramUsername String?   @map("telegram_username")
+  // Null = blocked forever; a date = blocked until then. isBlocked treats a past
+  // date as expired (the block self-lifts).
+  blockedUntil     DateTime? @map("blocked_until")
+  reason           String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@unique([shopId, telegramUserId])
+  @@index([shopId, telegramUserId])
+  @@map("blocked_telegram_customers")
 }

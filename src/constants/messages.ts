@@ -40,10 +40,22 @@ export const Messages = {
   ORDER_STATUS_UPDATED: 'Order status updated successfully',
   INSUFFICIENT_PAYMENT: 'Received amount is insufficient for the total',
   ORDER_VALIDATION_FAILED: 'One or more items in the order are invalid',
+  ORDER_ITEM_REQUIRES_OPTION: 'A required option was not selected for one or more items',
+  ORDER_ITEM_PRICE_INVALID:
+    'One or more items have an invalid price (a size or option must be selected)',
+  INVALID_EXCHANGE_RATE: 'Shop exchange rate is invalid; please update it in Shop Settings',
   ORDERS_RETRIEVED: 'Orders retrieved successfully',
+  // Void & item cancellation
+  ORDER_VOIDED: 'Order voided and payment refunded',
+  ORDER_ITEM_CANCELED: 'Item cancelled and order recalculated',
+  ORDER_ALREADY_VOIDED: 'This order has already been voided',
+  INVALID_ORDER_STATUS_TRANSITION: 'This order status change is not allowed',
+  ORDER_ITEM_NOT_FOUND: 'Order item not found for this order',
+  ORDER_ITEM_ALREADY_CANCELED: 'This item has already been cancelled',
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',
+  INITIAL_STOCK: 'Initial stock',
   // Promotions
   PROMOTION_NOT_FOUND: 'Promotion not found',
   PROMOTION_CREATED: 'Promotion created successfully',
@@ -60,4 +72,12 @@ export const Messages = {
     'One or more selected items or categories already belong to another promotion. Remove them from the other promotion first.',
   // Variation Templates
   VARIATION_TEMPLATE_NOT_FOUND: 'Variation template not found',
+  // Customer pre-order (Telegram Mini App)
+  MENU_RETRIEVED: 'Menu retrieved successfully',
+  PREORDER_CREATED: 'Your pre-order has been placed. The café will contact you shortly.',
+  PREORDERS_RETRIEVED: 'Pre-orders retrieved successfully',
+  TELEGRAM_AUTH_FAILED: 'Could not verify your Telegram session. Please reopen the app.',
+  CUSTOMER_BLOCKED: 'You are temporarily blocked from placing orders. Please contact the café.',
+  CUSTOMER_BLOCKED_ADDED: 'Customer blocked',
+  CUSTOMER_BLOCK_REMOVED: 'Customer unblocked',
 } as const

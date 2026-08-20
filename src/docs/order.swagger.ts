@@ -23,8 +23,6 @@
  *               - paymentMethod
  *               - paymentCurrency
  *               - receivedAmount
- *               - exchangeRateSnapshot
- *               - totalAmount
  *               - items
  *             properties:
  *               orderType:
@@ -41,13 +39,9 @@
  *                 example: USD
  *               receivedAmount:
  *                 type: number
+ *                 minimum: 0
+ *                 description: Amount handed over in the payment currency. May be 0 for a 100%-off order. For KHR it must be a whole number of 100៛ notes. The total and exchange rate are computed server-side and are NOT accepted from the client.
  *                 example: 5.00
- *               exchangeRateSnapshot:
- *                 type: number
- *                 example: 4100
- *               totalAmount:
- *                 type: number
- *                 example: 4.00
  *               items:
  *                 type: array
  *                 minItems: 1
@@ -118,15 +112,22 @@
  *                       example: 4.50
  *                     receivedAmount:
  *                       type: number
+ *                       description: Amount received in the payment currency (riel for KHR, dollars for USD).
+ *                       example: 5.00
+ *                     receivedAmountUsd:
+ *                       type: number
+ *                       description: Received amount normalised to USD for currency-agnostic reporting.
  *                       example: 5.00
  *                     paymentCurrency:
  *                       type: string
  *                       example: USD
  *                     changeAmount:
  *                       type: number
+ *                       description: Change returned in the payment currency (riel rounded down to the nearest 100៛).
  *                       example: 0.50
  *                     exchangeRateSnapshot:
  *                       type: number
+ *                       description: Server-resolved shop exchange rate applied to this order.
  *                       example: 4100
  *                     paymentStatus:
  *                       type: string
@@ -165,7 +166,7 @@
  *         name: paymentStatus
  *         schema:
  *           type: string
- *           enum: [paid, unpaid]
+ *           enum: [paid, unpaid, refunded, partially_refunded]
  *         description: Filter orders by payment status
  *       - in: query
  *         name: date
@@ -429,4 +430,81 @@
  *         description: Unauthorized
  *       404:
  *         description: Order not found
+ *
+ * /api/orders/{id}/void:
+ *   post:
+ *     tags:
+ *       - Order
+ *     summary: Void a whole order and reverse the payment
+ *     description: >-
+ *       Cancels every remaining line, recalculates the order to zero, refunds the
+ *       remaining amount via a reversing (negative) transaction, un-redeems any
+ *       promotions, and marks the order refunded + canceled. Voided orders drop out
+ *       of every sales report. Idempotent guard: an already-voided order returns 400.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Order ID to void
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 maxLength: 255
+ *                 description: Optional free-text reason recorded on the void.
+ *                 example: Customer changed their mind
+ *     responses:
+ *       200:
+ *         description: Order voided; returns the updated order tree
+ *       400:
+ *         description: Invalid order ID or the order is already voided
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Order not found
+ *
+ * /api/orders/{id}/items/{itemId}/cancel:
+ *   post:
+ *     tags:
+ *       - Order
+ *     summary: Cancel a single line item and refund the difference
+ *     description: >-
+ *       Marks one order item cancelled (kept on the order, struck through),
+ *       recalculates the order total over the surviving lines, re-runs the promotion
+ *       engine (so an invalidated promotion is dropped, not just subtracted), and
+ *       writes a reversing transaction for the refunded difference. If it was the last
+ *       live line the order is fully voided (refunded + canceled).
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Order ID
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Order item ID to cancel
+ *     responses:
+ *       200:
+ *         description: Item cancelled; returns the recalculated order tree
+ *       400:
+ *         description: Invalid IDs, the item is already cancelled, or the order is already voided
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Order or item not found
  */

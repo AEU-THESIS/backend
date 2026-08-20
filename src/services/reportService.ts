@@ -1,4 +1,5 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
+import { Prisma } from '@prisma/client'
 import {
   getPeriodStartDate,
   getItemReportRange,
@@ -7,6 +8,15 @@ import {
   KpiRange,
   buildRangeBuckets,
 } from '../utils/date'
+
+// Cancelled/voided money must never show up in a report. Only orders that actually
+// took money count: `paid`, plus `partially_refunded` (whose `totalAmount` already
+// holds just the surviving net). `fulfillment_status = canceled` is also excluded so
+// legacy paid-but-canceled orders drop out too. Reused across every report query.
+const soldOrderWhere: Prisma.OrderWhereInput = {
+  paymentStatus: { in: ['paid', 'partially_refunded'] },
+  fulfillmentStatus: { not: 'canceled' },
+}
 
 export const reportService = {
   async getDailySummary(shopId: number, date?: string) {
@@ -31,7 +41,7 @@ export const reportService = {
         by: ['paymentMethod'],
         where: {
           shopId,
-          paymentStatus: 'paid',
+          ...soldOrderWhere,
           createdAt: { gte: startOfDay, lte: endOfDay },
         },
         _sum: { totalAmount: true },
@@ -71,7 +81,7 @@ export const reportService = {
 
     const salesFor = async (from: Date, to: Date) => {
       const orders = await prisma.order.findMany({
-        where: { shopId, paymentStatus: 'paid', createdAt: { gte: from, lte: to } },
+        where: { shopId, ...soldOrderWhere, createdAt: { gte: from, lte: to } },
         select: { totalAmount: true },
       })
       const netSales = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0)
@@ -119,10 +129,11 @@ export const reportService = {
 
     const orderItems = await prisma.orderItem.findMany({
       where: {
+        canceledAt: null,
         order: {
           shopId,
+          ...soldOrderWhere,
           createdAt: { gte: start, lte: end },
-          paymentStatus: 'paid',
         },
       },
       include: {
@@ -174,8 +185,8 @@ export const reportService = {
     const orders = await prisma.order.findMany({
       where: {
         shopId,
+        ...soldOrderWhere,
         createdAt: { gte: startDate },
-        paymentStatus: 'paid',
       },
       select: {
         totalAmount: true,
@@ -243,7 +254,7 @@ export const reportService = {
       const { points, bucketIndex } = buildRangeBuckets(start, end)
 
       const orders = await prisma.order.findMany({
-        where: { shopId, paymentStatus: 'paid', createdAt: { gte: start, lte: end } },
+        where: { shopId, ...soldOrderWhere, createdAt: { gte: start, lte: end } },
         select: { totalAmount: true, createdAt: true },
       })
 
@@ -306,7 +317,7 @@ export const reportService = {
     const orders = await prisma.order.findMany({
       where: {
         shopId,
-        paymentStatus: 'paid',
+        ...soldOrderWhere,
         createdAt: { gte: start, lte: now },
       },
       select: { totalAmount: true, createdAt: true },
@@ -332,10 +343,11 @@ export const reportService = {
 
     const orderItems = await prisma.orderItem.findMany({
       where: {
+        canceledAt: null,
         order: {
           shopId,
+          ...soldOrderWhere,
           createdAt: { gte: startDate },
-          paymentStatus: 'paid',
         },
       },
       include: {
@@ -383,10 +395,11 @@ export const reportService = {
 
     const orderItems = await prisma.orderItem.findMany({
       where: {
+        canceledAt: null,
         order: {
           shopId,
+          ...soldOrderWhere,
           createdAt: { gte: startDate },
-          paymentStatus: 'paid',
         },
       },
       include: {
@@ -421,7 +434,8 @@ export const reportService = {
 
   async getInventoryInsights(shopId: number) {
     const ingredients = await prisma.ingredient.findMany({
-      where: { shopId },
+      // Ingredients are soft-deleted; insights cover the live catalogue only.
+      where: { shopId, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -474,8 +488,8 @@ export const reportService = {
       const orders = await prisma.order.findMany({
         where: {
           shopId,
+          ...soldOrderWhere,
           createdAt: { gte: startDate },
-          paymentStatus: 'paid',
         },
         include: {
           user: { select: { name: true } },
@@ -511,7 +525,7 @@ export const reportService = {
       ].join('\n')
     } else {
       const ingredients = await prisma.ingredient.findMany({
-        where: { shopId },
+        where: { shopId, deletedAt: null },
         orderBy: { name: 'asc' },
       })
 
