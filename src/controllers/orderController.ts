@@ -121,6 +121,23 @@ export const orderController = {
     return sendSuccess(res, order, Messages.ORDER_VOIDED, HttpStatus.OK)
   }),
 
+  // Reject a pending customer pre-order from the staff Pre-Orders board (the
+  // board's counterpart to the Telegram "Block" action, minus the block-list).
+  // Safe with no refund because a pre-order is unpaid.
+  rejectPreOrder: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+
+    const params = GetOrderParamsSchema.safeParse(req.params)
+    if (!params.success) {
+      throw new AppError(Messages.INVALID_ORDER_ID, HttpStatus.BAD_REQUEST)
+    }
+
+    const order = await orderService.rejectPreOrder(shopId, params.data.id)
+    orderSseController.safeBroadcastToShop(shopId, 'order_updated', order)
+
+    return sendSuccess(res, order, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
+  }),
+
   cancelItem: catchAsync(async (req: Request, res: Response) => {
     const userId = req.user!.user_id
     const shopId = req.user!.shop_id

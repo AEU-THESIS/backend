@@ -63,4 +63,12 @@ router.post(
   orderController.cancelItem
 )
 
+// 8. Reject a pending customer pre-order from the Pre-Orders board (unpaid → rejected)
+router.put(
+  '/:id/reject',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
+  orderController.rejectPreOrder
+)
+
 export default router

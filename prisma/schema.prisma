@@ -41,10 +41,14 @@ enum OrderPaymentStatus {
 }
 
 enum OrderFulfillmentStatus {
+  // A customer pre-order awaiting staff acceptance; not yet in the kitchen flow.
+  pending
   preparing
   ready
   completed
   canceled
+  // A customer pre-order the staff declined (distinct from a voided/canceled sale).
+  rejected
 }
 
 enum TransactionStatus {
@@ -72,17 +76,18 @@ model Shop {
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
-  users                   User[]
-  roles                   Role[]
-  categories              Category[]
-  products                Product[]
-  optionSets              OptionSet[]
-  variationGroupTemplates VariationGroupTemplate[]
-  promotions              Promotion[]
-  ingredients             Ingredient[]
-  notifications           Notification[]
-  shopTables              ShopTable[]
-  orders                  Order[]
+  users                    User[]
+  roles                    Role[]
+  categories               Category[]
+  products                 Product[]
+  optionSets               OptionSet[]
+  variationGroupTemplates  VariationGroupTemplate[]
+  promotions               Promotion[]
+  ingredients              Ingredient[]
+  notifications            Notification[]
+  shopTables               ShopTable[]
+  orders                   Order[]
+  blockedTelegramCustomers BlockedTelegramCustomer[]
 
   @@map("shops")
 }
@@ -506,9 +511,17 @@ model Order {
   orderNumber String @unique @map("order_number")
   orderType   String @map("order_type")
 
-  customerName    String? @map("customer_name")
-  customerPhone   String? @map("customer_phone")
-  deliveryAddress String? @map("delivery_address") @db.Text
+  customerName     String?  @map("customer_name")
+  customerPhone    String?  @map("customer_phone")
+  deliveryAddress  String?  @map("delivery_address") @db.Text
+  // Customer-shared GPS coordinates for a delivery pre-order. Stored as-is (no
+  // reverse-geocoding); staff open a Google Maps link built from these.
+  deliveryLat      Decimal? @map("delivery_lat") @db.Decimal(10, 7)
+  deliveryLng      Decimal? @map("delivery_lng") @db.Decimal(10, 7)
+  // Telegram identity of the guest who placed a Mini App pre-order (verified via
+  // initData). Null for staff-created POS orders.
+  telegramUserId   String?  @map("telegram_user_id")
+  telegramUsername String?  @map("telegram_username")
 
   totalAmount          Decimal @map("total_amount") @db.Decimal(10, 2)
   discountAmount       Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
@@ -629,4 +642,26 @@ model Transaction {
 
   @@index([orderId])
   @@map("transactions")
+}
+
+// Temporary block-list for abusive Telegram guests. A staff member taps "Block"
+// on the group notification; further Mini App pre-orders from this telegramUserId
+// are rejected until `blockedUntil`. Temporary by design so a mistaken block
+// self-resolves — there is no permanent ban.
+model BlockedTelegramCustomer {
+  id               Int       @id @default(autoincrement())
+  shopId           Int       @map("shop_id")
+  telegramUserId   String    @map("telegram_user_id")
+  telegramUsername String?   @map("telegram_username")
+  // Null = blocked forever; a date = blocked until then. isBlocked treats a past
+  // date as expired (the block self-lifts).
+  blockedUntil     DateTime? @map("blocked_until")
+  reason           String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@unique([shopId, telegramUserId])
+  @@index([shopId, telegramUserId])
+  @@map("blocked_telegram_customers")
 }

@@ -1,5 +1,7 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { CreateOrderInput } from '../validations/orderValidation'
+import type { CreatePreOrderInput } from '../validations/publicOrderValidation'
+import { telegramCustomerService } from './telegramCustomerService'
 import { Prisma } from '@prisma/client'
 import { promotionService } from './promotionService'
 import {
@@ -634,6 +636,7 @@ export const orderService = {
     shopId: number,
     filters: {
       status?: string
+      orderType?: string
       paymentStatus?: string
       hasComp?: boolean
       date?: string
@@ -646,6 +649,7 @@ export const orderService = {
   ) {
     const {
       status,
+      orderType,
       paymentStatus,
       hasComp,
       date,
@@ -680,9 +684,14 @@ export const orderService = {
       shopId,
     }
 
-    // Status filter (preparing, ready, completed, canceled)
+    // Status filter (pending, preparing, ready, completed, canceled)
     if (status) {
       whereClause.fulfillmentStatus = status
+    }
+
+    // Order-origin filter (e.g. pre_order for the Pre-Orders board).
+    if (orderType) {
+      whereClause.orderType = orderType
     }
 
     // "Free items only" reconciliation filter — restrict to orders carrying at least
@@ -855,13 +864,35 @@ export const orderService = {
       throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
     }
 
-    // A canceled/voided order is terminal — it can't be moved back to an active
-    // status, which would silently un-cancel an already-refunded order.
-    if (order.fulfillmentStatus === 'canceled') {
+    // A canceled/rejected order is terminal — it can't be moved back to an active
+    // status, which would silently un-cancel an already-refunded/declined order.
+    if (order.fulfillmentStatus === 'canceled' || order.fulfillmentStatus === 'rejected') {
       throw new AppError(Messages.ORDER_ALREADY_VOIDED, HttpStatus.BAD_REQUEST)
     }
 
-    // 3. Update fulfillmentStatus
+    // A pending pre-order must be accepted first (pending -> preparing) before it can
+    // be readied or completed. Without this a pending order could jump straight to
+    // 'completed' and auto-settle its COD payment to paid without ever being accepted.
+    // POS orders never start 'pending', so this only constrains customer pre-orders.
+    if (order.fulfillmentStatus === 'pending' && nextStatus !== 'preparing') {
+      throw new AppError(Messages.INVALID_ORDER_STATUS_TRANSITION, HttpStatus.BAD_REQUEST)
+    }
+
+    // A COD pre-order is unpaid until it's fulfilled. Completing it means the drink
+    // was delivered and cash collected, so settle it to a paid sale here — that's
+    // what makes a delivered pre-order count in the sales reports. POS orders are
+    // already paid, so this only ever affects pre-orders.
+    const settleOnComplete =
+      nextStatus === 'completed' && order.paymentStatus === 'unpaid'
+        ? {
+            paymentStatus: 'paid' as const,
+            receivedAmount: order.totalAmount,
+            receivedAmountUsd: order.totalAmount,
+            changeAmount: 0,
+          }
+        : {}
+
+    // 3. Update fulfillmentStatus (and settle payment if completing a pre-order)
     try {
       const updatedOrder = await prisma.order.update({
         where: {
@@ -870,6 +901,7 @@ export const orderService = {
         },
         data: {
           fulfillmentStatus: nextStatus,
+          ...settleOnComplete,
         },
         include: {
           items: {
@@ -944,6 +976,258 @@ export const orderService = {
       await performCancellation(tx, order, [itemId], userId, { explicitVoid: false })
     })
 
+    return orderService.getOrderById(shopId, orderId)
+  },
+
+  /**
+   * Creates a customer pre-order from the Telegram Mini App. The order is unpaid
+   * and awaiting staff validation (fulfillmentStatus 'pending'); payment and the
+   * delivery fee are settled manually over Telegram, so no payment amounts or
+   * promotions are applied here — the total is the straight server-recomputed sum
+   * of the items. Pricing is validated server-side exactly like POS checkout
+   * (products must belong to the shop and be available; required options and
+   * by-size pricing are enforced), and the total is never trusted from the client.
+   *
+   * NOTE: this mirrors the item pricing/validation in `createOrder`. If that logic
+   * changes, update both — kept separate deliberately so the live POS checkout is
+   * never destabilised by the pre-order path.
+   */
+  async createPreOrder(
+    shopId: number,
+    telegram: { id: string; username?: string },
+    payload: CreatePreOrderInput
+  ) {
+    // Refuse blocked guests before doing any work.
+    if (await telegramCustomerService.isBlocked(shopId, telegram.id)) {
+      throw new AppError(Messages.CUSTOMER_BLOCKED, HttpStatus.FORBIDDEN)
+    }
+
+    const { items, customerName, customerPhone, deliveryAddress, deliveryLat, deliveryLng } =
+      payload
+
+    // ── 1. Validate all products belong to this shop and are available ──
+    const uniqueProductIds = Array.from(new Set(items.map(i => i.productId)))
+    const products = await prisma.product.findMany({
+      where: { id: { in: uniqueProductIds }, shopId, isAvailable: true },
+    })
+    if (products.length !== uniqueProductIds.length) {
+      throw new AppError(Messages.PRODUCT_NOT_FOUND, HttpStatus.BAD_REQUEST)
+    }
+    const productMap = new Map(products.map(p => [p.id, p]))
+
+    const productOptionSets = await prisma.productOptionSet.findMany({
+      where: { productId: { in: uniqueProductIds } },
+      include: { optionSet: { include: { elements: true } } },
+    })
+    const {
+      cache: productOptionsCache,
+      requiredSets: requiredSetsByProduct,
+      sizeSets: sizeSetsByProduct,
+    } = indexProductOptionSets(productOptionSets)
+
+    // ── 2. Server-side price recalculation & validation ──
+    let serverTotal = 0
+    const validatedItemsList: Array<{
+      productId: number
+      quantity: number
+      basePrice: number
+      optionsExtra: number
+      subtotal: number
+      validatedOptions: Array<{ groupName: string; optionName: string; extraPrice: number }>
+    }> = []
+
+    for (const item of items) {
+      const product = productMap.get(item.productId)!
+      const basePrice = product.price == null ? 0 : Number(product.price)
+
+      let optionsExtra = 0
+      const validatedOptions: Array<{
+        groupName: string
+        optionName: string
+        extraPrice: number
+      }> = []
+      const chosenSetIds = new Set<number>()
+      const optionSetsMap = productOptionsCache.get(item.productId)
+
+      for (const option of item.selectedOptions) {
+        const optionSet = optionSetsMap?.get(option.optionSetId)
+        if (!optionSet) {
+          throw new AppError(Messages.ORDER_VALIDATION_FAILED, HttpStatus.BAD_REQUEST)
+        }
+        const optionElement = optionSet.elementsMap.get(option.elementId)
+        if (!optionElement) {
+          throw new AppError(Messages.ORDER_VALIDATION_FAILED, HttpStatus.BAD_REQUEST)
+        }
+        optionsExtra += optionElement.extraPrice
+        chosenSetIds.add(option.optionSetId)
+        validatedOptions.push({
+          groupName: optionSet.groupName,
+          optionName: optionElement.optionName,
+          extraPrice: optionElement.extraPrice,
+        })
+      }
+
+      const requiredSetIds = requiredSetsByProduct.get(item.productId)
+      if (requiredSetIds) {
+        for (const requiredSetId of requiredSetIds) {
+          if (!chosenSetIds.has(requiredSetId)) {
+            throw new AppError(Messages.ORDER_ITEM_REQUIRES_OPTION, HttpStatus.BAD_REQUEST)
+          }
+        }
+      }
+
+      if (product.priceMode === 'by_size') {
+        const sizeSetIds = sizeSetsByProduct.get(item.productId)
+        const hasSizeChosen = !!sizeSetIds && [...sizeSetIds].some(id => chosenSetIds.has(id))
+        if (!hasSizeChosen) {
+          throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
+        }
+      }
+      if (basePrice + optionsExtra <= 0) {
+        throw new AppError(Messages.ORDER_ITEM_PRICE_INVALID, HttpStatus.BAD_REQUEST)
+      }
+
+      const subtotal = (basePrice + optionsExtra) * item.quantity
+      serverTotal += subtotal
+      validatedItemsList.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        basePrice,
+        optionsExtra,
+        subtotal,
+        validatedOptions,
+      })
+    }
+    serverTotal = round2(serverTotal)
+
+    // ── 3. Snapshot the shop's exchange rate (record parity with POS orders) ──
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { exchangeRate: true },
+    })
+    if (!shop) {
+      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    const exchangeRate = Number(shop.exchangeRate)
+
+    // ── 4. Persist: Order (unpaid / pending) + Items + Options ──
+    const order = await withUniqueRetry(() =>
+      prisma.$transaction(async tx => {
+        const orderNumber = await nextDailyOrderNumber(tx, shopId)
+        const createdOrder = await tx.order.create({
+          data: {
+            shopId,
+            userId: null,
+            orderNumber,
+            orderType: 'pre_order',
+            customerName: customerName ?? null,
+            customerPhone,
+            deliveryAddress: deliveryAddress ?? null,
+            deliveryLat: deliveryLat ?? null,
+            deliveryLng: deliveryLng ?? null,
+            telegramUserId: telegram.id,
+            telegramUsername: telegram.username ?? null,
+            totalAmount: serverTotal,
+            discountAmount: 0,
+            receivedAmount: 0,
+            receivedAmountUsd: 0,
+            changeAmount: 0,
+            paymentCurrency: 'USD',
+            exchangeRateSnapshot: exchangeRate,
+            paymentMethod: 'cod',
+            paymentStatus: 'unpaid',
+            fulfillmentStatus: 'pending',
+          },
+        })
+
+        for (const valItem of validatedItemsList) {
+          const createdItem = await tx.orderItem.create({
+            data: {
+              orderId: createdOrder.id,
+              productId: valItem.productId,
+              quantity: valItem.quantity,
+              price: valItem.basePrice,
+              extraPrice: valItem.optionsExtra,
+              subtotal: valItem.subtotal,
+            },
+          })
+          if (valItem.validatedOptions.length > 0) {
+            await tx.orderItemOption.createMany({
+              data: valItem.validatedOptions.map(o => ({
+                orderItemId: createdItem.id,
+                groupName: o.groupName,
+                optionName: o.optionName,
+                extraPrice: o.extraPrice,
+              })),
+            })
+          }
+        }
+
+        return createdOrder
+      })
+    )
+
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      totalAmount: serverTotal,
+      fulfillmentStatus: order.fulfillmentStatus,
+      paymentStatus: order.paymentStatus,
+    }
+  },
+
+  /**
+   * Minimal order context resolved by id alone (no shop scope needed up front) —
+   * used by the Telegram webhook, where the inline button only carries the order
+   * id and the shop must be derived from the order itself.
+   */
+  async getOrderContext(orderId: number) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        shopId: true,
+        orderNumber: true,
+        orderType: true,
+        fulfillmentStatus: true,
+        telegramUserId: true,
+        telegramUsername: true,
+        shop: { select: { currencySymbol: true } },
+      },
+    })
+    if (!order) {
+      throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    return order
+  },
+
+  /**
+   * Rejects an unpaid, still-pending pre-order (staff tapped "Block", or rejected
+   * it on the board). Simply marks it canceled — safe with no refund path because
+   * a pre-order carries no money (unpaid). Idempotent: an already-canceled order is
+   * returned unchanged.
+   */
+  async rejectPreOrder(shopId: number, orderId: number) {
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, shopId },
+      select: { id: true, orderType: true, paymentStatus: true, fulfillmentStatus: true },
+    })
+    if (!order) {
+      throw new AppError(Messages.ORDER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    if (order.orderType !== 'pre_order' || order.paymentStatus !== 'unpaid') {
+      // Only unpaid pre-orders can be rejected this way; anything with money must
+      // go through the void/refund flow instead.
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+    // Rejected is a distinct terminal state from canceled — it records a declined
+    // pre-order (not a voided sale). Idempotent for both terminal states.
+    if (order.fulfillmentStatus !== 'rejected' && order.fulfillmentStatus !== 'canceled') {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { fulfillmentStatus: 'rejected' },
+      })
+    }
     return orderService.getOrderById(shopId, orderId)
   },
 }

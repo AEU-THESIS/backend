@@ -366,6 +366,7 @@ export const productService = {
       name: p.name,
       price: p.price ? Number(p.price) : null,
       imageUrl: p.imageUrl,
+      categoryId: p.category?.id ?? p.categoryId ?? null,
       category: p.category,
       isAvailable: p.isAvailable,
       priceMode: p.priceMode,

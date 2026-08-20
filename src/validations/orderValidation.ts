@@ -52,7 +52,14 @@ export type CreateOrderInput = z.infer<typeof CreateOrderSchema>
 
 // payment_status / fulfillment_status are DB enums now, so an unknown value in the
 // filter would throw a Prisma validation error (500). Validate them here → clean 400.
-const FULFILLMENT_STATUSES = ['preparing', 'ready', 'completed', 'canceled'] as const
+const FULFILLMENT_STATUSES = [
+  'pending',
+  'preparing',
+  'ready',
+  'completed',
+  'canceled',
+  'rejected',
+] as const
 const PAYMENT_STATUSES = ['paid', 'unpaid', 'refunded', 'partially_refunded', 'comp'] as const
 
 export const GetOrdersQuerySchema = z.object({
@@ -71,7 +78,10 @@ export const GetOrdersQuerySchema = z.object({
           .every(s => (PAYMENT_STATUSES as readonly string[]).includes(s)),
       { message: 'Invalid payment status filter' }
     ),
-  paymentMethod: z.enum(['cash', 'khqr']).optional(),
+  paymentMethod: z.enum(['cash', 'khqr', 'cod']).optional(),
+  // Filter by order origin so the Pre-Orders board can request only customer
+  // pre-orders (orderType=pre_order), separate from POS orders.
+  orderType: z.enum(['dine_in', 'takeaway', 'pre_order']).optional(),
   // Order History "free items only" reconciliation filter: when 'true', return only
   // orders that contain at least one complimentary line. Query params arrive as
   // strings, so accept the two literals and expose a boolean.

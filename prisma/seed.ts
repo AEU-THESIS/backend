@@ -45,8 +45,8 @@ async function main() {
     update: {},
     create: {
       name: 'Routine Café & Bakery',
-      slug: 'routincafe',
-      ownerName: 'Admin',
+      slug: 'routinecafe',
+      ownerName: 'Chamnap Pich Veacha',
       currencySymbol: '$',
       exchangeRate: 4100,
       phone: '+855 12 345 678',
@@ -148,23 +148,176 @@ async function main() {
   // ==========================================
   // 4. CATEGORIES
   // ==========================================
+  // Routine Cafe physical menu groups (imported from the client's printed menu).
+  // These three real groups lead the list; older placeholder categories were removed.
   const categoryData = [
-    { name: 'Coffee', sortOrder: 1 },
-    { name: 'Tea', sortOrder: 2 },
-    { name: 'Bakery', sortOrder: 3 },
-    { name: 'Breakfast', sortOrder: 4 },
-    { name: 'Pastry', sortOrder: 5 },
+    { name: 'Iced Drinks', sortOrder: 1 },
+    { name: 'Hot Drinks', sortOrder: 2 },
+    { name: 'Frappe', sortOrder: 3 },
+    { name: 'Bakery', sortOrder: 4 },
   ]
 
   const categories: Record<string, { id: number }> = {}
   for (const cat of categoryData) {
     const existing = await prisma.category.findFirst({ where: { shopId: shop.id, name: cat.name } })
     if (existing) {
-      categories[cat.name] = existing
+      // Keep sortOrder authoritative so re-seeding applies the intended ordering.
+      categories[cat.name] = await prisma.category.update({
+        where: { id: existing.id },
+        data: { sortOrder: cat.sortOrder },
+      })
     } else {
       const created = await prisma.category.create({ data: { ...cat, shopId: shop.id } })
       categories[cat.name] = created
     }
+  }
+
+  // ==========================================
+  // 5. PRODUCTS (Routine Cafe printed menu — client go-live catalog)
+  // ==========================================
+  // Prices are USD (the $ value on the menu). All items are drinks with a fixed
+  // price. The three printed menu groups map to categories: Iced / Hot / Frappe.
+  // Some drinks appear in more than one group at different prices (e.g. Americano
+  // is $1.25 iced but $1.00 hot), so each group keeps its own product row.
+  const productData: { name: string; price: number; category: string }[] = [
+    // --- Iced Drinks ---
+    { name: 'Americano', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Latte', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Coffee Milk', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Cappuccino', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Mocha', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Caramel Latte', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Chocolate', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Matcha Latte', price: 1.5, category: 'Iced Drinks' },
+    { name: 'Green Tea', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Red Tea', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Lemon Tea', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Strawberry Soda', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Blueberry Soda', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Passion Soda', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Milk Passion', price: 1.25, category: 'Iced Drinks' },
+    { name: 'Passion Machiato', price: 1.5, category: 'Iced Drinks' },
+    // --- Hot Drinks (name prefixed with "Hot" so it's unambiguous vs the iced row) ---
+    { name: 'Hot Espresso', price: 1.0, category: 'Hot Drinks' },
+    { name: 'Hot Americano', price: 1.0, category: 'Hot Drinks' },
+    { name: 'Hot Latte', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Coffee Milk', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Cappuccino', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Mocha', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Matcha Latte', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Chocolate', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Green Tea', price: 1.25, category: 'Hot Drinks' },
+    { name: 'Hot Lemon Tea', price: 1.25, category: 'Hot Drinks' },
+    // --- Frappe ---
+    { name: 'Café Frappe', price: 1.5, category: 'Frappe' },
+    { name: 'Chocolate Frappe', price: 1.5, category: 'Frappe' },
+    { name: 'Mocha Frappe', price: 1.5, category: 'Frappe' },
+    { name: 'Matcha Frappe', price: 1.75, category: 'Frappe' },
+    { name: 'Green Tea Frappe', price: 1.5, category: 'Frappe' },
+    { name: 'Red Tea Frappe', price: 1.5, category: 'Frappe' },
+    { name: 'Strawberry Smoothie', price: 1.5, category: 'Frappe' },
+    { name: 'Blueberry Smoothie', price: 1.5, category: 'Frappe' },
+  ]
+
+  let productsCreated = 0
+  for (const p of productData) {
+    const category = categories[p.category]
+    if (!category) continue // category guaranteed above, but stay defensive
+    // Idempotent on (shopId, categoryId, name): re-running never duplicates.
+    const existing = await prisma.product.findFirst({
+      where: { shopId: shop.id, categoryId: category.id, name: p.name },
+    })
+    if (existing) continue
+    await prisma.product.create({
+      data: {
+        shopId: shop.id,
+        categoryId: category.id,
+        name: p.name,
+        price: p.price,
+        type: 'drink',
+        priceMode: 'fixed',
+        isAvailable: true,
+      },
+    })
+    productsCreated++
+  }
+
+  // ==========================================
+  // 6. OPTIONS — Sugar level (preset percentage steps)
+  // ==========================================
+  // The café lets customers pick sweetness as a percentage. We model it with the
+  // standard OptionSet system as discrete preset steps, which is how coffee /
+  // bubble-tea POS systems handle sugar (a free 1–100 slider would need a new
+  // numeric option type across schema, API and cart). Attached to every drink.
+  const SUGAR_STEPS = ['0%', '25%', '50%', '75%', '100%']
+
+  let sugarOptionSet = await prisma.optionSet.findFirst({
+    where: { shopId: shop.id, name: 'Sugar' },
+  })
+  if (!sugarOptionSet) {
+    sugarOptionSet = await prisma.optionSet.create({
+      data: {
+        shopId: shop.id,
+        name: 'Sugar',
+        type: 'custom',
+        elements: {
+          create: SUGAR_STEPS.map((label, i) => ({ label, priceModifier: 0, position: i })),
+        },
+      },
+    })
+  }
+
+  // Link Sugar to every drink (idempotent per product).
+  const drinks = await prisma.product.findMany({
+    where: { shopId: shop.id, type: 'drink' },
+    select: { id: true },
+  })
+  let sugarLinks = 0
+  for (const d of drinks) {
+    const linked = await prisma.productOptionSet.findFirst({
+      where: { productId: d.id, optionSetId: sugarOptionSet.id },
+    })
+    if (!linked) {
+      await prisma.productOptionSet.create({
+        data: { productId: d.id, optionSetId: sugarOptionSet.id, isRequired: false },
+      })
+      sugarLinks++
+    }
+  }
+
+  // Keep the reusable "Sugar" template in sync so staff get the % steps from the
+  // Templates picker when adding new drinks.
+  const sugarTemplate = await prisma.variationGroupTemplate.findFirst({
+    where: { shopId: shop.id, name: 'Sugar' },
+  })
+  if (sugarTemplate) {
+    await prisma.variationGroupTemplateOption.deleteMany({
+      where: { templateId: sugarTemplate.id },
+    })
+    await prisma.variationGroupTemplateOption.createMany({
+      data: SUGAR_STEPS.map((label, i) => ({
+        templateId: sugarTemplate.id,
+        optionLabel: label,
+        priceModifier: 0,
+        displayOrder: i,
+      })),
+    })
+  } else {
+    await prisma.variationGroupTemplate.create({
+      data: {
+        shopId: shop.id,
+        name: 'Sugar',
+        category: 'Drink',
+        createdBy: admin.id,
+        options: {
+          create: SUGAR_STEPS.map((label, i) => ({
+            optionLabel: label,
+            priceModifier: 0,
+            displayOrder: i,
+          })),
+        },
+      },
+    })
   }
 
   // ==========================================
@@ -178,7 +331,10 @@ async function main() {
   console.log('   📧 cashier@routincafe.com  [Cashier]')
   console.log('\n📦 CATALOG:')
   console.log(`   🗂️  ${Object.keys(categories).length} categories seeded`)
-  // console.log(`   🛍️  ${Object.keys(products).length} products seeded`)
+  console.log(`   🛍️  ${productData.length} menu products (${productsCreated} newly created)`)
+  console.log(
+    `   🍬 Sugar option (${SUGAR_STEPS.join(' / ')}) linked to ${drinks.length} drinks (${sugarLinks} newly linked)`
+  )
   // console.log(`   🔧 3 option sets (Size, Sugar Level, Ice Level)`)
   // console.log('\n🏭 INVENTORY:')
   // console.log(`   🧴 ${Object.keys(ingredients).length} ingredients seeded`)
