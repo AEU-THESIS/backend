@@ -34,6 +34,10 @@ enum OrderPaymentStatus {
   unpaid
   refunded
   partially_refunded
+  // Fully complimentary order (total = 0 because every charged line was redeemed
+  // free, e.g. a loyalty-stamp reward). Excluded from paid-only sales queries so it
+  // records no phantom revenue.
+  comp
 }
 
 enum OrderFulfillmentStatus {
@@ -209,9 +213,10 @@ model Category {
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
 
-  shop       Shop                @relation(fields: [shopId], references: [id])
-  products   Product[]
-  promotions PromotionCategory[]
+  shop        Shop                @relation(fields: [shopId], references: [id])
+  products    Product[]
+  promotions  PromotionCategory[]
+  ingredients Ingredient[]
 
   @@map("categories")
 }
@@ -369,19 +374,36 @@ model PromotionProduct {
 // CAFE INVENTORY (RECIPES & INGREDIENTS)
 // ==========================================
 model Ingredient {
-  id                Int      @id @default(autoincrement())
-  shopId            Int      @map("shop_id")
+  id                Int       @id @default(autoincrement())
+  shopId            Int       @map("shop_id")
+  categoryId        Int?      @map("category_id")
   name              String
-  unitOfMeasure     String   @map("unit_of_measure")
-  currentStock      Decimal  @default(0.00) @map("current_stock") @db.Decimal(10, 2)
-  lowStockThreshold Decimal  @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
-  imageUrl          String?  @map("image_url") @db.LongText
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  unitOfMeasure     String    @map("unit_of_measure")
+  currentStock      Decimal   @default(0.00) @map("current_stock") @db.Decimal(10, 2)
+  lowStockThreshold Decimal   @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
+  // Weighted-average cost per unit. 4 dp (not 2) so small per-unit costs — e.g.
+  // coffee at $18/kg = $0.018/g — aren't rounded to zero.
+  unitCost          Decimal   @default(0.0000) @map("unit_cost") @db.Decimal(12, 4)
+  // Most recent purchase price per unit (the price from the last stock-in).
+  lastUnitCost      Decimal   @default(0.0000) @map("last_unit_cost") @db.Decimal(12, 4)
+  // Currency the cost figures are recorded in (the shop's configured currency).
+  // Currency the cost figures are recorded in. No default: it is always derived
+  // from the owning Shop's currencySymbol, so a blanket '$' here would silently
+  // mislabel local-currency costs.
+  costCurrency      String    @map("cost_currency")
+  imageUrl          String?   @map("image_url") @db.LongText
+  // Soft delete. IngredientLog rows are an immutable audit trail, so removing an
+  // item hides it from the catalogue rather than destroying its stock history.
+  deletedAt         DateTime? @map("deleted_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  shop    Shop            @relation(fields: [shopId], references: [id])
-  recipes ProductRecipe[]
-  logs    IngredientLog[]
+  shop     Shop            @relation(fields: [shopId], references: [id])
+  category Category?       @relation(fields: [categoryId], references: [id])
+  recipes  ProductRecipe[]
+  logs     IngredientLog[]
 
+  @@index([shopId, deletedAt])
+  @@index([categoryId])
   @@map("ingredients")
 }
 
@@ -403,6 +425,9 @@ model IngredientLog {
   userId          Int      @map("user_id")
   transactionType String   @map("transaction_type")
   quantityChanged Decimal  @map("quantity_changed") @db.Decimal(10, 2)
+  // Purchase price per unit at the moment of a stock-in (USD base). Null for
+  // removals. Captures cost history so past spend can be reconstructed later.
+  unitCost        Decimal? @map("unit_cost") @db.Decimal(12, 4)
   reason          String?
   createdAt       DateTime @default(now()) @map("created_at")
 
@@ -565,6 +590,13 @@ model OrderItem {
   price      Decimal @db.Decimal(10, 2)
   extraPrice Decimal @default(0.00) @map("extra_price") @db.Decimal(10, 2)
   subtotal   Decimal @db.Decimal(10, 2)
+
+  // Complimentary line (e.g. a loyalty-stamp "buy 10 get 1 free" redemption). A comp
+  // line is persisted with subtotal = 0 so it adds no revenue to any report, while
+  // price/extraPrice are kept so the receipt can still show its normal (struck) price.
+  // compReason records why it was given free — a permanent audit trail on the order.
+  isComplimentary Boolean @default(false) @map("is_complimentary")
+  compReason      String? @map("comp_reason")
 
   // Item cancellation (whole-line). canceledQuantity mirrors quantity when
   // cancelled; the row is kept (struck through in the UI), never deleted, so the

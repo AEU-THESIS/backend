@@ -16,9 +16,11 @@ router.use(authenticate)
 router.use(requireRoles([ROLES.ADMIN, ROLES.MANAGER]))
 
 router.get('/', inventoryController.getAll)
+router.get('/valuations', inventoryController.getValuation)
 router.post('/', upload.single('image'), inventoryController.create)
 router.put('/:id', upload.single('image'), inventoryController.update)
 router.delete('/:id', inventoryController.delete)
 router.post('/:id/adjustments', inventoryController.adjust)
+router.get('/:id/history', inventoryController.getHistory)
 
 export default router

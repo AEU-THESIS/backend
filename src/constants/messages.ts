@@ -55,6 +55,7 @@ export const Messages = {
   // Inventory
   INGREDIENT_NOT_FOUND: 'Ingredient not found',
   STOCK_UPDATED: 'Stock updated successfully',
+  INITIAL_STOCK: 'Initial stock',
   // Promotions
   PROMOTION_NOT_FOUND: 'Promotion not found',
   PROMOTION_CREATED: 'Promotion created successfully',

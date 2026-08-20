@@ -12,6 +12,13 @@ const OrderItemSchema = z.strictObject({
   productId: z.number().int().positive(),
   quantity: z.number().int().min(1).max(99),
   selectedOptions: z.array(SelectedOptionSchema).default([]),
+  // Complimentary (free) line — e.g. a loyalty-stamp redemption. When true the
+  // server persists the line with subtotal = 0 (no revenue) but keeps its price for
+  // the receipt. compReason is the audit note for why it was given free.
+  isComplimentary: z.boolean().default(false),
+  // Cap matches the generated `comp_reason` column length (VARCHAR(191)) so an
+  // over-long reason is rejected with a clean 400 instead of failing at insert.
+  compReason: z.string().trim().max(191).optional(),
 })
 
 export const CreateOrderSchema = z
@@ -53,7 +60,7 @@ const FULFILLMENT_STATUSES = [
   'canceled',
   'rejected',
 ] as const
-const PAYMENT_STATUSES = ['paid', 'unpaid', 'refunded', 'partially_refunded'] as const
+const PAYMENT_STATUSES = ['paid', 'unpaid', 'refunded', 'partially_refunded', 'comp'] as const
 
 export const GetOrdersQuerySchema = z.object({
   status: z.enum(FULFILLMENT_STATUSES).optional(),
@@ -75,6 +82,13 @@ export const GetOrdersQuerySchema = z.object({
   // Filter by order origin so the Pre-Orders board can request only customer
   // pre-orders (orderType=pre_order), separate from POS orders.
   orderType: z.enum(['dine_in', 'takeaway', 'pre_order']).optional(),
+  // Order History "free items only" reconciliation filter: when 'true', return only
+  // orders that contain at least one complimentary line. Query params arrive as
+  // strings, so accept the two literals and expose a boolean.
+  hasComp: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform(value => (value === undefined ? undefined : value === 'true')),
   date: z.string().optional(),
   search: z.string().optional(),
   startDate: z.string().optional(),
