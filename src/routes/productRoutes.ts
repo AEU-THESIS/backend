@@ -29,4 +29,11 @@ router.put(
   productController.update
 )
 
+router.delete(
+  '/:id',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  productController.remove
+)
+
 export default router

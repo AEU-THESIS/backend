@@ -29,8 +29,12 @@ export const Messages = {
   CATEGORY_NOT_FOUND: 'Category not found',
   PRODUCT_NOT_FOUND: 'Product not found or does not belong to this shop',
   PRODUCT_CREATED: 'Product created successfully',
+  PRODUCT_DELETED: 'Product deleted successfully',
+  PRODUCT_IN_USE: 'This product cannot be deleted because it has been used in orders',
   CATEGORY_CREATED: 'Category created successfully',
   CATEGORY_UPDATED: 'Category updated successfully',
+  CATEGORY_DELETED: 'Category deleted successfully',
+  CATEGORY_IN_USE: 'This category cannot be deleted because it still contains products',
   // Orders
   ORDER_CREATED: 'Order placed successfully',
   ORDER_RETRIEVED: 'Order retrieved successfully',

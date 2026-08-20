@@ -13,6 +13,7 @@ import {
   updateCategorySchema,
   getCategoryQuerySchema,
 } from '../validations/categoryValidation'
+import { idParamSchema } from '../validations/commonValidation'
 
 export const categoryController = {
   create: catchAsync(async (req: Request, res: Response) => {
@@ -42,6 +43,14 @@ export const categoryController = {
     const category = await categoryService.update(shopId, categoryId, categoryPayload)
 
     return sendSuccess(res, category, Messages.CATEGORY_UPDATED, HttpStatus.OK)
+  }),
+
+  remove: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { id: categoryId } = idParamSchema.parse(req.params)
+
+    await categoryService.remove(shopId, categoryId)
+    return sendSuccess(res, null, Messages.CATEGORY_DELETED, HttpStatus.OK)
   }),
 
   getAll: catchAsync(async (req: Request, res: Response) => {
