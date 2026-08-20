@@ -49,6 +49,7 @@ export const Messages = {
   ORDER_VOIDED: 'Order voided and payment refunded',
   ORDER_ITEM_CANCELED: 'Item cancelled and order recalculated',
   ORDER_ALREADY_VOIDED: 'This order has already been voided',
+  INVALID_ORDER_STATUS_TRANSITION: 'This order status change is not allowed',
   ORDER_ITEM_NOT_FOUND: 'Order item not found for this order',
   ORDER_ITEM_ALREADY_CANCELED: 'This item has already been cancelled',
   // Inventory
@@ -70,4 +71,12 @@ export const Messages = {
     'One or more selected items or categories already belong to another promotion. Remove them from the other promotion first.',
   // Variation Templates
   VARIATION_TEMPLATE_NOT_FOUND: 'Variation template not found',
+  // Customer pre-order (Telegram Mini App)
+  MENU_RETRIEVED: 'Menu retrieved successfully',
+  PREORDER_CREATED: 'Your pre-order has been placed. The café will contact you shortly.',
+  PREORDERS_RETRIEVED: 'Pre-orders retrieved successfully',
+  TELEGRAM_AUTH_FAILED: 'Could not verify your Telegram session. Please reopen the app.',
+  CUSTOMER_BLOCKED: 'You are temporarily blocked from placing orders. Please contact the café.',
+  CUSTOMER_BLOCKED_ADDED: 'Customer blocked',
+  CUSTOMER_BLOCK_REMOVED: 'Customer unblocked',
 } as const
