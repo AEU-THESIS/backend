@@ -10,6 +10,7 @@ import { idParamSchema } from '../validations/commonValidation'
 import {
   adjustInventoryItemSchema,
   createInventoryItemSchema,
+  inventoryHistoryQuerySchema,
   inventoryQuerySchema,
   updateInventoryItemSchema,
 } from '../validations/inventoryValidation'
@@ -28,10 +29,15 @@ export const inventoryController = {
     return sendSuccess(res, result)
   }),
 
+  getValuation: catchAsync(async (req: Request, res: Response) => {
+    const valuation = await inventoryService.getValuation(req.user!.shop_id)
+    return sendSuccess(res, valuation)
+  }),
+
   create: catchAsync(async (req: Request, res: Response) => {
     const body = createInventoryItemSchema.parse(req.body)
     const imageUrl = await getUploadedImageUrl(req)
-    const item = await inventoryService.create(req.user!.shop_id, body, imageUrl)
+    const item = await inventoryService.create(req.user!.shop_id, req.user!.user_id, body, imageUrl)
     return sendSuccess(res, item, Messages.CREATED, HttpStatus.CREATED)
   }),
 
@@ -54,5 +60,12 @@ export const inventoryController = {
     const body = adjustInventoryItemSchema.parse(req.body)
     const item = await inventoryService.adjust(id, req.user!.shop_id, req.user!.user_id, body)
     return sendSuccess(res, item)
+  }),
+
+  getHistory: catchAsync(async (req: Request, res: Response) => {
+    const { id } = idParamSchema.parse(req.params)
+    const query = inventoryHistoryQuerySchema.parse(req.query)
+    const history = await inventoryService.getHistory(id, req.user!.shop_id, query)
+    return sendSuccess(res, history)
   }),
 }

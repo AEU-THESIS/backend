@@ -434,7 +434,8 @@ export const reportService = {
 
   async getInventoryInsights(shopId: number) {
     const ingredients = await prisma.ingredient.findMany({
-      where: { shopId },
+      // Ingredients are soft-deleted; insights cover the live catalogue only.
+      where: { shopId, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -524,7 +525,7 @@ export const reportService = {
       ].join('\n')
     } else {
       const ingredients = await prisma.ingredient.findMany({
-        where: { shopId },
+        where: { shopId, deletedAt: null },
         orderBy: { name: 'asc' },
       })
 
