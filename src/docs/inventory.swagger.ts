@@ -20,6 +20,12 @@
  *         costCurrency: { type: string, example: "$" }
  *         totalValue: { type: number, description: quantity × unitCost, example: 31.25 }
  *         imageUrl: { type: string, nullable: true }
+ *         category:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             id: { type: integer }
+ *             name: { type: string }
  *         status:
  *           type: string
  *           enum: [in_stock, low_stock, out_of_stock]
@@ -73,6 +79,7 @@
  *             properties:
  *               name: { type: string }
  *               unit_of_measure: { type: string, example: kg }
+ *               category_id: { type: integer, nullable: true }
  *               quantity: { type: number, example: 10 }
  *               min_alert_threshold: { type: number, example: 5 }
  *               unit_cost: { type: number, description: Cost price per unit, example: 2 }
@@ -129,6 +136,7 @@
  *             properties:
  *               name: { type: string }
  *               unit_of_measure: { type: string }
+ *               category_id: { type: integer, nullable: true }
  *               quantity: { type: number }
  *               min_alert_threshold: { type: number }
  *               unit_cost: { type: number }
@@ -214,7 +222,7 @@
  *         schema: { type: integer, default: 1 }
  *       - in: query
  *         name: limit
- *         schema: { type: integer, default: 5, maximum: 100 }
+ *         schema: { type: integer, default: 10, maximum: 100 }
  *     responses:
  *       200:
  *         description: Paginated history for the range
@@ -237,6 +245,7 @@
  *                           type: { type: string, enum: [add, remove] }
  *                           quantityChanged: { type: number }
  *                           unitCost: { type: number, nullable: true }
+ *                           value: { type: number, nullable: true, description: quantityChanged × unitCost }
  *                           notes: { type: string, nullable: true }
  *                           user: { type: string, nullable: true }
  *                           userRole: { type: string, nullable: true }

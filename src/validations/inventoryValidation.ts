@@ -36,10 +36,14 @@ const nonNegativeCost = decimalInput
     `Cost supports at most ${COST_SCALE} decimal places`
   )
 
+const optionalCategoryId = z.coerce.number().int().positive().optional()
+
 const inventoryItemBaseSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   unitOfMeasure: z.string().trim().min(1, 'Unit of measure is required').optional(),
   unit_of_measure: z.string().trim().min(1, 'Unit of measure is required').optional(),
+  categoryId: optionalCategoryId,
+  category_id: optionalCategoryId,
   // No `.default(0)` here: `.partial()` does not strip a default, so an update
   // that omits `quantity` would still parse to 0 and reset the item's stock.
   // The opening-stock default belongs to create alone (applied below).
@@ -95,6 +99,20 @@ const validateAliasPairs = (data: InventoryItemAliasInput, ctx: z.RefinementCtx)
       })
     })
   }
+
+  if (
+    data.categoryId !== undefined &&
+    data.category_id !== undefined &&
+    data.categoryId !== data.category_id
+  ) {
+    ;(['categoryId', 'category_id'] as const).forEach(path => {
+      ctx.addIssue({
+        code: 'custom',
+        path: [path],
+        message: 'categoryId and category_id must match when both are provided',
+      })
+    })
+  }
 }
 
 export const createInventoryItemSchema = inventoryItemBaseSchema
@@ -145,7 +163,7 @@ export const inventoryHistoryQuerySchema = z
     from: isoDateTime.optional(),
     to: isoDateTime.optional(),
     page: z.coerce.number().int().positive().default(1),
-    limit: z.coerce.number().int().positive().max(100).default(5),
+    limit: z.coerce.number().int().positive().max(100).default(10),
   })
   .superRefine((data, ctx) => {
     if (data.from && data.to && Date.parse(data.from) > Date.parse(data.to)) {

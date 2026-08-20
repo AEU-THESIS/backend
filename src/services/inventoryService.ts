@@ -39,6 +39,7 @@ const mapInventoryItem = (item: {
   costCurrency: string
   imageUrl: string | null
   updatedAt: Date
+  category?: { id: number; name: string } | null
 }) => {
   const quantity = toDecimal(item.currentStock)
   const minAlertThreshold = toDecimal(item.lowStockThreshold)
@@ -58,6 +59,18 @@ const mapInventoryItem = (item: {
     imageUrl: item.imageUrl,
     status: getInventoryStatus(quantity, minAlertThreshold),
     updatedAt: item.updatedAt,
+    category: item.category ?? null,
+  }
+}
+
+// Category is shop-scoped, so an id from another shop must never be attachable
+// to this shop's ingredient.
+const CATEGORY_SELECT = { select: { id: true, name: true } } as const
+
+const assertCategoryInShop = async (categoryId: number, shopId: number) => {
+  const category = await prisma.category.findFirst({ where: { id: categoryId, shopId } })
+  if (!category) {
+    throw new AppError(Messages.CATEGORY_NOT_FOUND, HttpStatus.BAD_REQUEST)
   }
 }
 
@@ -80,6 +93,12 @@ const getMinAlertThreshold = (data: CreateInventoryItemInput | UpdateInventoryIt
 const getUnitCost = (data: CreateInventoryItemInput | UpdateInventoryItemInput) => {
   if ('unitCost' in data && data.unitCost !== undefined) return data.unitCost
   if ('unit_cost' in data && data.unit_cost !== undefined) return data.unit_cost
+  return undefined
+}
+
+const getCategoryId = (data: CreateInventoryItemInput | UpdateInventoryItemInput) => {
+  if ('categoryId' in data && data.categoryId !== undefined) return data.categoryId
+  if ('category_id' in data && data.category_id !== undefined) return data.category_id
   return undefined
 }
 
@@ -112,6 +131,7 @@ export const inventoryService = {
         }),
       },
       orderBy: { updatedAt: 'desc' },
+      include: { category: CATEGORY_SELECT },
     })
 
     const mappedItems = items.map(mapInventoryItem)
@@ -123,6 +143,9 @@ export const inventoryService = {
   async create(shopId: number, userId: number, data: CreateInventoryItemInput, imageUrl?: string) {
     const initialCost = toDecimal(getUnitCost(data) ?? 0)
     const initialQuantity = toDecimal(data.quantity)
+    const categoryId = getCategoryId(data)
+    if (categoryId !== undefined) await assertCategoryInShop(categoryId, shopId)
+
     // Record the item's cost in whatever currency the shop is configured with.
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
@@ -136,6 +159,7 @@ export const inventoryService = {
       const created = await tx.ingredient.create({
         data: {
           shopId,
+          categoryId: categoryId ?? null,
           name: data.name,
           unitOfMeasure: getUnitOfMeasure(data) || 'unit',
           currentStock: initialQuantity,
@@ -145,6 +169,7 @@ export const inventoryService = {
           costCurrency: shop?.currencySymbol || DEFAULT_COST_CURRENCY,
           imageUrl,
         },
+        include: { category: CATEGORY_SELECT },
       })
 
       if (initialQuantity.greaterThan(0)) {
@@ -169,6 +194,9 @@ export const inventoryService = {
   async update(id: number, shopId: number, data: UpdateInventoryItemInput, imageUrl?: string) {
     await getExistingInventoryItem(id, shopId)
 
+    const categoryId = getCategoryId(data)
+    if (categoryId !== undefined) await assertCategoryInShop(categoryId, shopId)
+
     const unitCost = getUnitCost(data)
     // A manual cost update *establishes* the cost, so the currency label has to
     // follow the shop. Without this, an item whose currency was backfilled to a
@@ -186,6 +214,7 @@ export const inventoryService = {
       data: {
         ...(data.name !== undefined && { name: data.name }),
         ...(getUnitOfMeasure(data) !== undefined && { unitOfMeasure: getUnitOfMeasure(data) }),
+        ...(categoryId !== undefined && { categoryId }),
         ...(data.quantity !== undefined && { currentStock: data.quantity }),
         ...(getMinAlertThreshold(data) !== undefined && {
           lowStockThreshold: getMinAlertThreshold(data),
@@ -197,6 +226,7 @@ export const inventoryService = {
         }),
         ...(imageUrl !== undefined && { imageUrl }),
       },
+      include: { category: CATEGORY_SELECT },
     })
 
     return mapInventoryItem(item)
@@ -287,6 +317,7 @@ export const inventoryService = {
 
       const updatedItem = await tx.ingredient.findUniqueOrThrow({
         where: { id },
+        include: { category: CATEGORY_SELECT },
       })
 
       return mapInventoryItem(updatedItem)
@@ -361,6 +392,12 @@ export const inventoryService = {
         type: log.transactionType,
         quantityChanged: serialize(log.quantityChanged),
         unitCost: log.unitCost === null ? null : serialize(log.unitCost),
+        // Monetary value of this movement (qty x unit cost). Null when unitCost
+        // is null, same as the Unit Cost column it derives from.
+        value:
+          log.unitCost === null
+            ? null
+            : roundMoney(toDecimal(log.quantityChanged).times(toDecimal(log.unitCost))).toNumber(),
         notes: log.reason,
         user: log.user?.name ?? null,
         userRole: log.user?.roles[0]?.role.name ?? null,

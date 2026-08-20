@@ -204,9 +204,10 @@ model Category {
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
 
-  shop       Shop                @relation(fields: [shopId], references: [id])
-  products   Product[]
-  promotions PromotionCategory[]
+  shop        Shop                @relation(fields: [shopId], references: [id])
+  products    Product[]
+  promotions  PromotionCategory[]
+  ingredients Ingredient[]
 
   @@map("categories")
 }
@@ -366,6 +367,7 @@ model PromotionProduct {
 model Ingredient {
   id                Int       @id @default(autoincrement())
   shopId            Int       @map("shop_id")
+  categoryId        Int?      @map("category_id")
   name              String
   unitOfMeasure     String    @map("unit_of_measure")
   currentStock      Decimal   @default(0.00) @map("current_stock") @db.Decimal(10, 2)
@@ -386,11 +388,13 @@ model Ingredient {
   deletedAt         DateTime? @map("deleted_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  shop    Shop            @relation(fields: [shopId], references: [id])
-  recipes ProductRecipe[]
-  logs    IngredientLog[]
+  shop     Shop            @relation(fields: [shopId], references: [id])
+  category Category?       @relation(fields: [categoryId], references: [id])
+  recipes  ProductRecipe[]
+  logs     IngredientLog[]
 
   @@index([shopId, deletedAt])
+  @@index([categoryId])
   @@map("ingredients")
 }
 
