@@ -68,8 +68,10 @@ export const publicOrderService = {
    * this customer's orders with pagination support for infinite scrolling.
    */
   async getMyOrders(shopId: number, telegramUserId: string, page = 1, limit = 10) {
-    const p = Math.max(1, Number(page) || 1)
-    const l = Math.min(50, Math.max(1, Number(limit) || 10))
+    const rawPage = Math.trunc(Number(page))
+    const rawLimit = Math.trunc(Number(limit))
+    const p = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1
+    const l = Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 50) : 10
     const skip = (p - 1) * l
 
     const [total, orders] = await Promise.all([

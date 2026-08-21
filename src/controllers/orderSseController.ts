@@ -1,5 +1,6 @@
 import { Request, Response, HttpStatus, Messages } from '../core/Controller'
 import { prisma } from '../core/Service'
+import { verifyTelegramInitData } from '../utils/telegram'
 
 // Map of shopId -> Array of active authenticated staff client responses
 const activeClients = new Map<number, Response[]>()
@@ -90,11 +91,26 @@ export const orderSseController = {
       return
     }
 
-    const telegramUserId = req.telegramUser?.id
-      ? String(req.telegramUser.id)
-      : req.query.telegramUserId
-        ? String(req.query.telegramUserId)
-        : undefined
+    let telegramUserId: string | undefined
+
+    if (req.telegramUser?.id) {
+      telegramUserId = String(req.telegramUser.id)
+    } else {
+      const initData = String(req.query.initData ?? '')
+      if (initData) {
+        const verified = verifyTelegramInitData(initData, process.env.TELEGRAM_BOT_TOKEN ?? '')
+        if (verified) telegramUserId = verified.id
+      }
+    }
+
+    if (
+      !telegramUserId &&
+      process.env.NODE_ENV !== 'production' &&
+      process.env.TELEGRAM_ALLOW_DEV_INITDATA === 'true' &&
+      req.query.telegramUserId
+    ) {
+      telegramUserId = String(req.query.telegramUserId)
+    }
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache, no-transform')

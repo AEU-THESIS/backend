@@ -196,7 +196,7 @@ export const telegram = {
       return true
     } catch (err: any) {
       console.warn(
-        `⚠️ [telegram bot] Could not notify customer ${telegramUserId}:`,
+        '⚠️ [telegram bot] Could not deliver customer notification:',
         err?.message ?? err
       )
       return false

@@ -133,6 +133,13 @@ export const orderController = {
     // Sync Telegram group notification message & buttons in real time
     telegram.syncOrderGroupMessage(order).catch(() => {})
 
+    if (order.orderType === 'pre_order' && order.telegramUserId) {
+      const msg = buildCustomerStatusNotification(order, 'canceled')
+      if (msg) {
+        telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
+      }
+    }
+
     return sendSuccess(res, order, Messages.ORDER_VOIDED, HttpStatus.OK)
   }),
 
