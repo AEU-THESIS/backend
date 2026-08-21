@@ -1100,7 +1100,23 @@ export const orderService = {
     }
     serverTotal = round2(serverTotal)
 
-    // ── 3. Snapshot the shop's exchange rate (record parity with POS orders) ──
+    // ── 3. Calculate discounts via promotion engine ──
+    const cartLines: CartLineForCalc[] = validatedItemsList.map(v => ({
+      productId: v.productId,
+      categoryId: productMap.get(v.productId)!.categoryId,
+      quantity: v.quantity,
+      unitPrice: v.basePrice + v.optionsExtra,
+      subtotal: v.subtotal,
+    }))
+    const activePromotions = await promotionService.getActiveByShop(shopId)
+    const { total: discountAmount, applied } = cartDiscounts(activePromotions, cartLines)
+    const appliedPromotionIds = applied.map(a => a.promotion.id)
+    const primaryPromotionId = applied.length
+      ? applied.reduce((a, b) => (b.discount > a.discount ? b : a)).promotion.id
+      : null
+    const netTotal = Math.max(0, Math.round((serverTotal - discountAmount) * 100) / 100)
+
+    // ── 4. Snapshot the shop's exchange rate (record parity with POS orders) ──
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
       select: { exchangeRate: true },
@@ -1110,10 +1126,24 @@ export const orderService = {
     }
     const exchangeRate = Number(shop.exchangeRate)
 
-    // ── 4. Persist: Order (unpaid / pending) + Items + Options ──
+    // ── 5. Persist: Order (unpaid / pending) + Items + Options + Promotions ──
     const order = await withUniqueRetry(() =>
       prisma.$transaction(async tx => {
         const orderNumber = await nextDailyOrderNumber(tx, shopId)
+
+        let activeAppliedIds: number[] = []
+        if (appliedPromotionIds.length > 0) {
+          const stillActive = await tx.promotion.findMany({
+            where: { id: { in: appliedPromotionIds }, shopId, isActive: true },
+            select: { id: true },
+          })
+          activeAppliedIds = stillActive.map(p => p.id)
+        }
+        const effectivePromotionId =
+          primaryPromotionId && activeAppliedIds.includes(primaryPromotionId)
+            ? primaryPromotionId
+            : (activeAppliedIds[0] ?? null)
+
         const createdOrder = await tx.order.create({
           data: {
             shopId,
@@ -1127,8 +1157,9 @@ export const orderService = {
             deliveryLng: deliveryLng ?? null,
             telegramUserId: telegram.id,
             telegramUsername: telegram.username ?? null,
-            totalAmount: serverTotal,
-            discountAmount: 0,
+            totalAmount: netTotal,
+            discountAmount,
+            promotionId: effectivePromotionId,
             receivedAmount: 0,
             receivedAmountUsd: 0,
             changeAmount: 0,
@@ -1139,6 +1170,22 @@ export const orderService = {
             fulfillmentStatus: 'pending',
           },
         })
+
+        if (activeAppliedIds.length > 0) {
+          await tx.promotion.updateMany({
+            where: { id: { in: activeAppliedIds } },
+            data: { timesRedeemed: { increment: 1 } },
+          })
+          await tx.orderPromotion.createMany({
+            data: applied
+              .filter(a => activeAppliedIds.includes(a.promotion.id))
+              .map(a => ({
+                orderId: createdOrder.id,
+                promotionId: a.promotion.id,
+                discountAmount: a.discount,
+              })),
+          })
+        }
 
         for (const valItem of validatedItemsList) {
           const createdItem = await tx.orderItem.create({
@@ -1170,7 +1217,8 @@ export const orderService = {
     return {
       id: order.id,
       orderNumber: order.orderNumber,
-      totalAmount: serverTotal,
+      totalAmount: netTotal,
+      discountAmount,
       fulfillmentStatus: order.fulfillmentStatus,
       paymentStatus: order.paymentStatus,
     }

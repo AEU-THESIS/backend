@@ -1,5 +1,6 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import { productService } from './productService'
+import { promotionService } from './promotionService'
 
 /**
  * Read-side logic for the public Telegram Mini App: resolving a shop from its
@@ -27,13 +28,13 @@ export const publicOrderService = {
 
   /**
    * Customer-facing menu for a shop: active categories + available products (with
-   * their option sets). Internal fields (cost, stock, recipes) are never exposed —
-   * `productService.mapProducts` already returns only display-safe product data.
+   * their option sets) + active promotions. Internal fields (cost, stock, recipes)
+   * are never exposed — `productService.mapProducts` already returns only display-safe product data.
    */
   async getMenu(slug: string) {
     const shop = await this.resolveShopBySlug(slug)
 
-    const [categories, products] = await Promise.all([
+    const [categories, products, promotions] = await Promise.all([
       prisma.category.findMany({
         where: { shopId: shop.id, isActive: true },
         orderBy: { sortOrder: 'asc' },
@@ -51,55 +52,76 @@ export const publicOrderService = {
         },
         orderBy: { name: 'asc' },
       }),
+      promotionService.getActiveByShop(shop.id),
     ])
 
     return {
       shop,
       categories,
       products: productService.mapProducts(products),
+      promotions,
     }
   },
 
   /**
    * A guest's own pre-orders, matched by their verified Telegram id. Returns only
-   * this customer's orders — never any other guest's data.
+   * this customer's orders with pagination support for infinite scrolling.
    */
-  async getMyOrders(shopId: number, telegramUserId: string) {
-    const orders = await prisma.order.findMany({
-      where: { shopId, telegramUserId, orderType: 'pre_order' },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      select: {
-        id: true,
-        orderNumber: true,
-        totalAmount: true,
-        fulfillmentStatus: true,
-        paymentStatus: true,
-        createdAt: true,
-        items: {
-          select: {
-            id: true,
-            quantity: true,
-            product: { select: { name: true } },
-            options: { select: { optionName: true } },
+  async getMyOrders(shopId: number, telegramUserId: string, page = 1, limit = 10) {
+    const p = Math.max(1, Number(page) || 1)
+    const l = Math.min(50, Math.max(1, Number(limit) || 10))
+    const skip = (p - 1) * l
+
+    const [total, orders] = await Promise.all([
+      prisma.order.count({
+        where: { shopId, telegramUserId, orderType: 'pre_order' },
+      }),
+      prisma.order.findMany({
+        where: { shopId, telegramUserId, orderType: 'pre_order' },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: l,
+        select: {
+          id: true,
+          orderNumber: true,
+          totalAmount: true,
+          fulfillmentStatus: true,
+          paymentStatus: true,
+          createdAt: true,
+          items: {
+            select: {
+              id: true,
+              quantity: true,
+              product: { select: { name: true } },
+              options: { select: { optionName: true } },
+            },
           },
         },
-      },
-    })
+      }),
+    ])
 
-    return orders.map(o => ({
-      id: o.id,
-      orderNumber: o.orderNumber,
-      totalAmount: Number(o.totalAmount),
-      fulfillmentStatus: o.fulfillmentStatus,
-      paymentStatus: o.paymentStatus,
-      createdAt: o.createdAt,
-      items: o.items.map(it => ({
-        id: it.id,
-        quantity: it.quantity,
-        name: it.product?.name ?? '',
-        options: it.options.map(op => op.optionName),
+    const totalPages = Math.ceil(total / l)
+
+    return {
+      orders: orders.map(o => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        totalAmount: Number(o.totalAmount),
+        fulfillmentStatus: o.fulfillmentStatus,
+        paymentStatus: o.paymentStatus,
+        createdAt: o.createdAt,
+        items: o.items.map(it => ({
+          id: it.id,
+          quantity: it.quantity,
+          name: it.product?.name ?? '',
+          options: it.options.map(op => op.optionName),
+        })),
       })),
-    }))
+      total,
+      totalPages,
+      page: p,
+      limit: l,
+      hasMore: p < totalPages,
+    }
   },
 }

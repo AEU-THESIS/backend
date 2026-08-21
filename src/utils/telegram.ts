@@ -179,11 +179,89 @@ export const telegram = {
       ...(text ? { text } : {}),
     })
   },
+
+  /**
+   * Sends a direct status notification to a customer who placed an order via Telegram.
+   * If the customer hasn't started the bot or blocked it, catches safely without failing.
+   */
+  async notifyCustomer(telegramUserId: string, text: string): Promise<boolean> {
+    if (!telegramUserId || !BOT_TOKEN()) return false
+    try {
+      await callBotApi('sendMessage', {
+        chat_id: telegramUserId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      })
+      return true
+    } catch (err: any) {
+      console.warn(
+        `⚠️ [telegram bot] Could not notify customer ${telegramUserId}:`,
+        err?.message ?? err
+      )
+      return false
+    }
+  },
+
+  /**
+   * Syncs the staff Telegram group notification message when order status changes in the system.
+   */
+  async syncOrderGroupMessage(order: any, currencySymbol = '$'): Promise<void> {
+    if (!order?.telegramMessageId || !BOT_TOKEN()) return
+    const chatId = order.telegramChatId || GROUP_CHAT_ID()
+    if (!chatId) return
+
+    try {
+      const { text, replyMarkup } = buildPreOrderMessage(order, currencySymbol)
+      await this.editMessageText(chatId, order.telegramMessageId, text, replyMarkup)
+    } catch (err: any) {
+      console.warn(
+        `⚠️ [telegram bot] Could not sync group message for order #${order.id}:`,
+        err?.message ?? err
+      )
+    }
+  },
 }
 
 /** Escapes the five characters that matter for Telegram HTML parse mode. */
 export function escapeHtml(input: string): string {
   return input.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/**
+ * Builds user-friendly direct notifications sent to the customer on status changes.
+ */
+export function buildCustomerStatusNotification(
+  order: any,
+  status: string,
+  currencySymbol = '$'
+): string | null {
+  const orderNum = escapeHtml(order.orderNumber ?? '')
+  const total = Number(order.totalAmount ?? 0).toFixed(2)
+
+  switch (status) {
+    case 'preparing':
+      return [
+        `🎉 <b>Your order has been accepted!</b>`,
+        ``,
+        `Order <code>${orderNum}</code> has been accepted by the café and is now being prepared. ☕`,
+        ``,
+        `💵 <b>Total:</b> ${currencySymbol}${total}`,
+        `We'll notify you as soon as your order is ready! ✨`,
+      ].join('\n')
+
+    case 'rejected':
+    case 'canceled':
+      return [
+        `🚫 <b>Order Update</b>`,
+        ``,
+        `Your order <code>${orderNum}</code> could not be accepted by the café at this time.`,
+        `Please contact the shop if you have any questions.`,
+      ].join('\n')
+
+    default:
+      return null
+  }
 }
 
 /** A human, emoji-prefixed status line for the group message. */
@@ -192,13 +270,13 @@ function preOrderStatusLine(status: string): string {
     case 'pending':
       return '🟡 <b>Awaiting acceptance</b>'
     case 'preparing':
-      return '☕ <b>Preparing</b>'
+      return '🔵 <b>Preparing</b>'
     case 'ready':
-      return '🥤 <b>Ready</b>'
+      return '🟢 <b>Ready</b>'
     case 'completed':
       return '✔️ <b>Completed &amp; paid</b>'
     case 'rejected':
-      return '🚫 <b>Rejected</b>'
+      return '❌ <b>Rejected</b>'
     case 'canceled':
       return '🚫 <b>Canceled</b>'
     default:
@@ -216,7 +294,7 @@ export function buildPreOrderMessage(
   currencySymbol: string
 ): { text: string; replyMarkup: InlineKeyboard } {
   const lines: string[] = []
-  lines.push(`🛎️ <b>Pre-order</b> — <code>${escapeHtml(order.orderNumber)}</code>`)
+  lines.push(`Pre-order — <code>${escapeHtml(order.orderNumber)}</code>`)
   const statusLine = preOrderStatusLine(order.fulfillmentStatus)
   if (statusLine) lines.push(statusLine)
   lines.push('')
@@ -228,10 +306,10 @@ export function buildPreOrderMessage(
   }
 
   lines.push('')
-  lines.push(`💵 <b>Total:</b> ${currencySymbol}${Number(order.totalAmount).toFixed(2)}`)
-  if (order.customerName) lines.push(`👤 ${escapeHtml(order.customerName)}`)
-  if (order.customerPhone) lines.push(`📞 ${escapeHtml(order.customerPhone)}`)
-  if (order.telegramUsername) lines.push(`✈️ @${escapeHtml(order.telegramUsername)}`)
+  lines.push(`💵 Total: ${currencySymbol}${Number(order.totalAmount).toFixed(2)}`)
+  if (order.customerName) lines.push(`Customer name:  ${escapeHtml(order.customerName)}`)
+  if (order.customerPhone) lines.push(`Phone number: ${escapeHtml(order.customerPhone)}`)
+  if (order.telegramUsername) lines.push(`Username: @${escapeHtml(order.telegramUsername)}`)
   if (order.deliveryAddress) lines.push(`📝 ${escapeHtml(order.deliveryAddress)}`)
   if (order.deliveryLat != null && order.deliveryLng != null) {
     const lat = Number(order.deliveryLat)

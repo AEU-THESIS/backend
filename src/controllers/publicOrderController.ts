@@ -11,6 +11,7 @@ import { publicOrderService } from '../services/publicOrderService'
 import { orderService } from '../services/orderService'
 import { orderSseController } from './orderSseController'
 import { CreatePreOrderSchema, ShopSlugParamsSchema } from '../validations/publicOrderValidation'
+import prisma from '../config/database'
 import { buildPreOrderMessage, telegram } from '../utils/telegram'
 
 /**
@@ -50,7 +51,16 @@ export const publicOrderController = {
         orderSseController.safeBroadcastToShop(shop.id, 'order_created', fullOrder)
         if (telegram.isConfigured()) {
           const { text, replyMarkup } = buildPreOrderMessage(fullOrder, shop.currencySymbol)
-          await telegram.sendGroupMessage(text, replyMarkup)
+          const sent = await telegram.sendGroupMessage(text, replyMarkup)
+          if (sent?.message_id && sent?.chat?.id) {
+            await prisma.order.update({
+              where: { id: result.id },
+              data: {
+                telegramMessageId: sent.message_id,
+                telegramChatId: String(sent.chat.id),
+              },
+            })
+          }
         }
       } catch (err) {
         console.error('⚠️ [pre-order] post-create side effects failed:', err)
@@ -64,7 +74,21 @@ export const publicOrderController = {
     const { slug } = ShopSlugParamsSchema.parse(req.params)
     const telegramUser = req.telegramUser!
     const shop = await publicOrderService.resolveShopBySlug(slug)
-    const orders = await publicOrderService.getMyOrders(shop.id, telegramUser.id)
-    return sendSuccess(res, orders, Messages.PREORDERS_RETRIEVED)
+    const page = req.query.page ? Number(req.query.page) : 1
+    const limit = req.query.limit ? Number(req.query.limit) : 10
+
+    const result = await publicOrderService.getMyOrders(shop.id, telegramUser.id, page, limit)
+    return sendSuccess(
+      res,
+      {
+        orders: result.orders,
+        page: result.page,
+        totalPages: result.totalPages,
+        total: result.total,
+        hasMore: result.hasMore,
+      },
+      Messages.PREORDERS_RETRIEVED,
+      HttpStatus.OK
+    )
   }),
 }

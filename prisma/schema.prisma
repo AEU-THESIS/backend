@@ -522,6 +522,8 @@ model Order {
   // initData). Null for staff-created POS orders.
   telegramUserId   String?  @map("telegram_user_id")
   telegramUsername String?  @map("telegram_username")
+  telegramChatId   String?  @map("telegram_chat_id")
+  telegramMessageId Int?    @map("telegram_message_id")
 
   totalAmount          Decimal @map("total_amount") @db.Decimal(10, 2)
   discountAmount       Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
