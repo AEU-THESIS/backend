@@ -13,6 +13,7 @@ import { orderSseController } from './orderSseController'
 import { CreatePreOrderSchema, ShopSlugParamsSchema } from '../validations/publicOrderValidation'
 import prisma from '../config/database'
 import { buildPreOrderMessage, telegram } from '../utils/telegram'
+import { telegramCustomerService } from '../services/telegramCustomerService'
 
 /**
  * Public (Telegram Mini App) ordering endpoints. All routes are gated by
@@ -23,7 +24,15 @@ import { buildPreOrderMessage, telegram } from '../utils/telegram'
 export const publicOrderController = {
   getMenu: catchAsync(async (req: Request, res: Response) => {
     const { slug } = ShopSlugParamsSchema.parse(req.params)
-    const menu = await publicOrderService.getMenu(slug)
+    const telegramUser = req.telegramUser
+    const shop = await publicOrderService.resolveShopBySlug(slug)
+
+    // Immediate gate: if blocked, refuse menu access right away
+    if (telegramUser && (await telegramCustomerService.isBlocked(shop.id, telegramUser.id))) {
+      throw new AppError(Messages.CUSTOMER_BLOCKED, HttpStatus.FORBIDDEN)
+    }
+
+    const menu = await publicOrderService.getMenu(shop)
     return sendSuccess(res, menu, Messages.MENU_RETRIEVED)
   }),
 
@@ -74,6 +83,11 @@ export const publicOrderController = {
     const { slug } = ShopSlugParamsSchema.parse(req.params)
     const telegramUser = req.telegramUser!
     const shop = await publicOrderService.resolveShopBySlug(slug)
+
+    if (await telegramCustomerService.isBlocked(shop.id, telegramUser.id)) {
+      throw new AppError(Messages.CUSTOMER_BLOCKED, HttpStatus.FORBIDDEN)
+    }
+
     const page = req.query.page ? Number(req.query.page) : 1
     const limit = req.query.limit ? Number(req.query.limit) : 10
 

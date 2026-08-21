@@ -18,6 +18,7 @@ export const publicOrderService = {
         name: true,
         slug: true,
         currencySymbol: true,
+        isShopClosed: true,
       },
     })
     if (!shop) {
@@ -31,8 +32,21 @@ export const publicOrderService = {
    * their option sets) + active promotions. Internal fields (cost, stock, recipes)
    * are never exposed — `productService.mapProducts` already returns only display-safe product data.
    */
-  async getMenu(slug: string) {
-    const shop = await this.resolveShopBySlug(slug)
+  async getMenu(
+    target:
+      | string
+      | { id: number; name: string; slug: string; currencySymbol: string; isShopClosed: boolean }
+  ) {
+    const shop = typeof target === 'string' ? await this.resolveShopBySlug(target) : target
+
+    if (shop.isShopClosed) {
+      return {
+        shop,
+        categories: [],
+        products: [],
+        promotions: [],
+      }
+    }
 
     const [categories, products, promotions] = await Promise.all([
       prisma.category.findMany({

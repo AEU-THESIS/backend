@@ -1002,6 +1002,18 @@ export const orderService = {
       throw new AppError(Messages.CUSTOMER_BLOCKED, HttpStatus.FORBIDDEN)
     }
 
+    // Refuse orders if the shop is not found or is currently closed.
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { isShopClosed: true, exchangeRate: true },
+    })
+    if (!shop) {
+      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+    if (shop.isShopClosed) {
+      throw new AppError(Messages.SHOP_CLOSED, HttpStatus.BAD_REQUEST)
+    }
+
     const { items, customerName, customerPhone, deliveryAddress, deliveryLat, deliveryLng } =
       payload
 
@@ -1117,13 +1129,6 @@ export const orderService = {
     const netTotal = Math.max(0, Math.round((serverTotal - discountAmount) * 100) / 100)
 
     // ── 4. Snapshot the shop's exchange rate (record parity with POS orders) ──
-    const shop = await prisma.shop.findUnique({
-      where: { id: shopId },
-      select: { exchangeRate: true },
-    })
-    if (!shop) {
-      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
-    }
     const exchangeRate = Number(shop.exchangeRate)
 
     // ── 5. Persist: Order (unpaid / pending) + Items + Options + Promotions ──
