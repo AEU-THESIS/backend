@@ -28,6 +28,15 @@ const productInclude = {
   },
 } satisfies Prisma.ProductInclude
 
+/**
+ * True when a delete was rejected because a child row still references the
+ * parent: P2003 is the database FK error, P2014 is Prisma's own required-relation
+ * check. Both mean "still in use", not "server broke".
+ */
+const isRequiredRelationViolation = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  (error.code === 'P2003' || error.code === 'P2014')
+
 export const productService = {
   async create(shopId: number, data: CreateProductInput) {
     // Verify category exists and belongs to shop
@@ -296,23 +305,33 @@ export const productService = {
       throw new AppError(Messages.PRODUCT_IN_USE, HttpStatus.CONFLICT)
     }
 
-    await prisma.$transaction(async tx => {
-      const productOptionSets = await tx.productOptionSet.findMany({
-        where: { productId },
-        select: { optionSetId: true },
+    try {
+      await prisma.$transaction(async tx => {
+        const productOptionSets = await tx.productOptionSet.findMany({
+          where: { productId },
+          select: { optionSetId: true },
+        })
+        const optionSetIds = productOptionSets.map(item => item.optionSetId)
+
+        await tx.productOptionSet.deleteMany({ where: { productId } })
+        await tx.optionSetElement.deleteMany({ where: { optionSetId: { in: optionSetIds } } })
+        await tx.optionSet.deleteMany({ where: { id: { in: optionSetIds } } })
+
+        await tx.promotionProduct.deleteMany({ where: { productId } })
+        await tx.productRecipe.deleteMany({ where: { productId } })
+        await tx.cartItem.deleteMany({ where: { productId } })
+
+        await tx.product.delete({ where: { id: productId } })
       })
-      const optionSetIds = productOptionSets.map(item => item.optionSetId)
-
-      await tx.productOptionSet.deleteMany({ where: { productId } })
-      await tx.optionSetElement.deleteMany({ where: { optionSetId: { in: optionSetIds } } })
-      await tx.optionSet.deleteMany({ where: { id: { in: optionSetIds } } })
-
-      await tx.promotionProduct.deleteMany({ where: { productId } })
-      await tx.productRecipe.deleteMany({ where: { productId } })
-      await tx.cartItem.deleteMany({ where: { productId } })
-
-      await tx.product.delete({ where: { id: productId } })
-    })
+    } catch (error) {
+      // An order item (or another child row) can appear between the count above
+      // and this delete. The FK then rejects the delete, so report the same
+      // conflict the pre-check would have rather than a 500.
+      if (isRequiredRelationViolation(error)) {
+        throw new AppError(Messages.PRODUCT_IN_USE, HttpStatus.CONFLICT)
+      }
+      throw error
+    }
 
     return { id: productId }
   },

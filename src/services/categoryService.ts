@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   CreateCategoryInput,
@@ -13,15 +14,9 @@ const categorySelect = {
   isActive: true,
   sortOrder: true,
   _count: { select: { products: true } },
-}
+} satisfies Prisma.CategorySelect
 
-type CategoryRow = {
-  id: number
-  name: string
-  isActive: boolean
-  sortOrder: number
-  _count: { products: number }
-}
+type CategoryRow = Prisma.CategoryGetPayload<{ select: typeof categorySelect }>
 
 /**
  * Adds `cannotDelete` so the client can disable the delete action up front: a
@@ -31,6 +26,15 @@ const mapCategory = (category: CategoryRow) => ({
   ...category,
   cannotDelete: category._count.products > 0,
 })
+
+/**
+ * True when a delete was rejected because a child row still references the
+ * parent: P2003 is the database FK error, P2014 is Prisma's own required-relation
+ * check. Both mean "still in use", not "server broke".
+ */
+const isRequiredRelationViolation = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  (error.code === 'P2003' || error.code === 'P2014')
 
 export const categoryService = {
   async create(shopId: number, data: CreateCategoryInput) {
@@ -98,7 +102,17 @@ export const categoryService = {
     }
 
     // promotion_category rows cascade on delete, so no manual cleanup needed.
-    await prisma.category.delete({ where: { id: categoryId } })
+    try {
+      await prisma.category.delete({ where: { id: categoryId } })
+    } catch (error) {
+      // A product can land in this category between the count above and this
+      // delete. The FK then rejects the delete, so report the same conflict the
+      // pre-check would have rather than letting it surface as a 500.
+      if (isRequiredRelationViolation(error)) {
+        throw new AppError(Messages.CATEGORY_IN_USE, HttpStatus.CONFLICT)
+      }
+      throw error
+    }
 
     return { id: categoryId }
   },
