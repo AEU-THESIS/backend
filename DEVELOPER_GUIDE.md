@@ -23,11 +23,11 @@ Always design strict request schemas first.
 Do the DB lifting. Throw specific `AppError` on rule violations.
 
 ```typescript
-import { AppError } from "../utils/appError";
-import { HttpStatus } from "../constants/httpStatus";
+import { AppError } from '../utils/appError'
+import { HttpStatus } from '../constants/httpStatus'
 
 if (badThing) {
-  throw new AppError("A clean message", HttpStatus.BAD_REQUEST);
+  throw new AppError('A clean message', HttpStatus.BAD_REQUEST)
 }
 ```
 
@@ -35,24 +35,24 @@ if (badThing) {
 Wrap your logic effortlessly. No `try/catch` needed thanks to the global handler. Use the `core/Controller` exports to avoid redundant imports.
 
 ```typescript
-import { Request, Response, catchAsync, sendSuccess } from "../core/Controller";
+import { Request, Response, catchAsync, sendSuccess } from '../core/Controller'
 
 export const itemController = {
   create: catchAsync(async (req: Request, res: Response) => {
-    const item = await itemService.create(req.body);
-    return sendSuccess(res, item); // Standardized { success: true, data: {...} } format
+    const item = await itemService.create(req.body)
+    return sendSuccess(res, item) // Standardized { success: true, data: {...} } format
   }),
-};
+}
 ```
 
 **4. Routing & Roles (src/routes/)**
 Secure the endpoints.
 
 ```typescript
-import { authenticate } from "../middlewares/authMiddleware";
-import { requireRoles } from "../middlewares/roleMiddleware";
+import { authenticate } from '../middlewares/authMiddleware'
+import { requireRoles } from '../middlewares/roleMiddleware'
 
-router.post("/", authenticate, requireRoles(["Admin"]), itemController.create);
+router.post('/', authenticate, requireRoles(['Admin']), itemController.create)
 ```
 
 ## 🍝 Anti-Spaghetti Regulations (Clean Code)
@@ -76,6 +76,8 @@ To prevent the codebase from becoming unmaintainable over time, strictly adhere 
 8. **Best Return Practices**
    - For successful JSON responses, return via `sendSuccess` from `src/core/Controller` to keep API structure uniform.
    - Exceptions are allowed for non-JSON/stream/file responses, `204 No Content`, and centralized error handling paths.
+9. **No Vitest / Jest / Spec Files**
+   - Automated test frameworks (Vitest, Jest) are **not used** in this project. Do not create `.spec.ts` or `.test.ts` files or install test runner dependencies. Verification is done via `npm run build` (type-checking) and interactive Swagger testing.
 
 ## Security Overview
 

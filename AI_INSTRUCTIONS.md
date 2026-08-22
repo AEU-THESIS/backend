@@ -35,6 +35,7 @@ Router → Controller → Service → Model (Prisma)
    - **Crucial**: Import `prisma`, `AppError`, `HttpStatus`, and `Messages` entirely from `src/core/Service`.
 4. **Error Handling**: Do not write `try/catch` in controllers. Let `catchAsync` bounce errors securely to the global `errorHandler`.
 5. **No Magic Strings**: Always use `HttpStatus` and `Messages` imported from `src/constants/`.
+6. **No Vitest / Jest / Test Files**: Do **NOT** create `.spec.ts` or `.test.ts` files or import `vitest`/`jest`. Automated test suites are not configured in this project; stray test files break Docker and `tsc` production builds.
 
 ---
 
