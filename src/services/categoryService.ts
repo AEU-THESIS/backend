@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   CreateCategoryInput,
@@ -6,6 +7,34 @@ import type {
 } from '../validations/categoryValidation'
 
 const DEFAULT_CATEGORY_PAGE_SIZE = 6
+
+const categorySelect = {
+  id: true,
+  name: true,
+  isActive: true,
+  sortOrder: true,
+  _count: { select: { products: true } },
+} satisfies Prisma.CategorySelect
+
+type CategoryRow = Prisma.CategoryGetPayload<{ select: typeof categorySelect }>
+
+/**
+ * Adds `cannotDelete` so the client can disable the delete action up front: a
+ * category holding products has to keep them somewhere, so it stays.
+ */
+const mapCategory = (category: CategoryRow) => ({
+  ...category,
+  cannotDelete: category._count.products > 0,
+})
+
+/**
+ * True when a delete was rejected because a child row still references the
+ * parent: P2003 is the database FK error, P2014 is Prisma's own required-relation
+ * check. Both mean "still in use", not "server broke".
+ */
+const isRequiredRelationViolation = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  (error.code === 'P2003' || error.code === 'P2014')
 
 export const categoryService = {
   async create(shopId: number, data: CreateCategoryInput) {
@@ -19,15 +48,10 @@ export const categoryService = {
         name: data.name,
         isActive: data.isActive,
       },
-      select: {
-        id: true,
-        name: true,
-        isActive: true,
-        sortOrder: true,
-      },
+      select: categorySelect,
     })
 
-    return category
+    return mapCategory(category)
   },
 
   async update(shopId: number, categoryId: number, data: UpdateCategoryInput) {
@@ -49,16 +73,48 @@ export const categoryService = {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
       },
-      select: {
-        id: true,
-        name: true,
-        isActive: true,
-        sortOrder: true,
-        _count: { select: { products: true } },
-      },
+      select: categorySelect,
     })
 
-    return updatedCategory
+    return mapCategory(updatedCategory)
+  },
+
+  /**
+   * Deletes a category. Blocked while it still holds products — those rows point
+   * at it via a required FK, so they would be orphaned.
+   */
+  async remove(shopId: number, categoryId: number) {
+    if (!shopId || shopId <= 0) {
+      throw new AppError(Messages.INVALID_SHOP_SCOPE, HttpStatus.FORBIDDEN)
+    }
+
+    const existingCategory = await prisma.category.findFirst({
+      where: { id: categoryId, shopId },
+    })
+
+    if (!existingCategory) {
+      throw new AppError(Messages.CATEGORY_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    const productCount = await prisma.product.count({ where: { categoryId } })
+    if (productCount > 0) {
+      throw new AppError(Messages.CATEGORY_IN_USE, HttpStatus.CONFLICT)
+    }
+
+    // promotion_category rows cascade on delete, so no manual cleanup needed.
+    try {
+      await prisma.category.delete({ where: { id: categoryId } })
+    } catch (error) {
+      // A product can land in this category between the count above and this
+      // delete. The FK then rejects the delete, so report the same conflict the
+      // pre-check would have rather than letting it surface as a 500.
+      if (isRequiredRelationViolation(error)) {
+        throw new AppError(Messages.CATEGORY_IN_USE, HttpStatus.CONFLICT)
+      }
+      throw error
+    }
+
+    return { id: categoryId }
   },
 
   async getByShop(shopId: number, filters: GetCategoryQueryInput = {}) {
@@ -75,16 +131,10 @@ export const categoryService = {
       const categories = await prisma.category.findMany({
         where,
         orderBy: { sortOrder: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          sortOrder: true,
-          isActive: true,
-          _count: { select: { products: true } },
-        },
+        select: categorySelect,
       })
 
-      return categories
+      return categories.map(mapCategory)
     }
 
     const page = filters.page
@@ -96,19 +146,13 @@ export const categoryService = {
         orderBy: { sortOrder: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        select: {
-          id: true,
-          name: true,
-          sortOrder: true,
-          isActive: true,
-          _count: { select: { products: true } },
-        },
+        select: categorySelect,
       }),
       prisma.category.count({ where }),
     ])
 
     return {
-      categories,
+      categories: categories.map(mapCategory),
       total,
       page,
       totalPages: Math.ceil(total / pageSize),

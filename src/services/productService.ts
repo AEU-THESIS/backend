@@ -1,10 +1,41 @@
-import { PriceMode } from '@prisma/client'
+import { PriceMode, Prisma } from '@prisma/client'
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   ProductQueryInput,
   CreateProductInput,
   UpdateProductInput,
 } from '../validations/productValidation'
+
+const productInclude = {
+  category: {
+    select: { id: true, name: true },
+  },
+  optionSets: {
+    include: {
+      optionSet: {
+        include: {
+          elements: {
+            orderBy: { position: 'asc' },
+          },
+        },
+      },
+    },
+  },
+  // Backs the `cannotDelete` flag: a product referenced by an order must be kept
+  // so order history stays intact.
+  _count: {
+    select: { orderItems: true },
+  },
+} satisfies Prisma.ProductInclude
+
+/**
+ * True when a delete was rejected because a child row still references the
+ * parent: P2003 is the database FK error, P2014 is Prisma's own required-relation
+ * check. Both mean "still in use", not "server broke".
+ */
+const isRequiredRelationViolation = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  (error.code === 'P2003' || error.code === 'P2014')
 
 export const productService = {
   async create(shopId: number, data: CreateProductInput) {
@@ -32,22 +63,7 @@ export const productService = {
           priceMode: data.priceMode || 'fixed',
           type: data.type || 'drink',
         },
-        include: {
-          category: {
-            select: { id: true, name: true },
-          },
-          optionSets: {
-            include: {
-              optionSet: {
-                include: {
-                  elements: {
-                    orderBy: { position: 'asc' },
-                  },
-                },
-              },
-            },
-          },
-        },
+        include: productInclude,
       })
 
       // Create option sets if provided
@@ -87,22 +103,7 @@ export const productService = {
         // Fetch updated product with option sets
         const productWithOptionSets = await tx.product.findUniqueOrThrow({
           where: { id: product.id },
-          include: {
-            category: {
-              select: { id: true, name: true },
-            },
-            optionSets: {
-              include: {
-                optionSet: {
-                  include: {
-                    elements: {
-                      orderBy: { position: 'asc' },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          include: productInclude,
         })
 
         return this.mapProducts([productWithOptionSets!])[0]
@@ -127,22 +128,7 @@ export const productService = {
       const [products, total] = await Promise.all([
         prisma.product.findMany({
           where: baseWhere,
-          include: {
-            category: {
-              select: { id: true, name: true },
-            },
-            optionSets: {
-              include: {
-                optionSet: {
-                  include: {
-                    elements: {
-                      orderBy: { position: 'asc' },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          include: productInclude,
           orderBy: { name: 'asc' },
           skip,
           take,
@@ -161,22 +147,7 @@ export const productService = {
     // No pagination - return all products
     const products = await prisma.product.findMany({
       where: baseWhere,
-      include: {
-        category: {
-          select: { id: true, name: true },
-        },
-        optionSets: {
-          include: {
-            optionSet: {
-              include: {
-                elements: {
-                  orderBy: { position: 'asc' },
-                },
-              },
-            },
-          },
-        },
-      },
+      include: productInclude,
       orderBy: { name: 'asc' },
     })
 
@@ -188,22 +159,7 @@ export const productService = {
   async getById(productId: number, shopId: number) {
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      include: {
-        category: {
-          select: { id: true, name: true },
-        },
-        optionSets: {
-          include: {
-            optionSet: {
-              include: {
-                elements: {
-                  orderBy: { position: 'asc' },
-                },
-              },
-            },
-          },
-        },
-      },
+      include: productInclude,
     })
 
     if (!product) {
@@ -260,22 +216,7 @@ export const productService = {
           ...(data.priceMode !== undefined && { priceMode: data.priceMode }),
           ...(data.type !== undefined && { type: data.type }),
         },
-        include: {
-          category: {
-            select: { id: true, name: true },
-          },
-          optionSets: {
-            include: {
-              optionSet: {
-                include: {
-                  elements: {
-                    orderBy: { position: 'asc' },
-                  },
-                },
-              },
-            },
-          },
-        },
+        include: productInclude,
       })
 
       // Update option sets if provided
@@ -335,22 +276,7 @@ export const productService = {
         // Fetch updated product with new option sets
         const productWithUpdatedSets = await tx.product.findUniqueOrThrow({
           where: { id: productId },
-          include: {
-            category: {
-              select: { id: true, name: true },
-            },
-            optionSets: {
-              include: {
-                optionSet: {
-                  include: {
-                    elements: {
-                      orderBy: { position: 'asc' },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          include: productInclude,
         })
 
         return this.mapProducts([productWithUpdatedSets!])[0]
@@ -358,6 +284,56 @@ export const productService = {
 
       return this.mapProducts([updatedProduct])[0]
     })
+  },
+
+  /**
+   * Deletes a product. Blocked if any order references it (historical data is
+   * preserved); option sets, recipes and open cart rows are removed in the same
+   * transaction.
+   */
+  async remove(productId: number, shopId: number) {
+    const existingProduct = await prisma.product.findFirst({
+      where: { id: productId, shopId },
+    })
+
+    if (!existingProduct) {
+      throw new AppError(Messages.PRODUCT_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    const usedInOrders = await prisma.orderItem.count({ where: { productId } })
+    if (usedInOrders > 0) {
+      throw new AppError(Messages.PRODUCT_IN_USE, HttpStatus.CONFLICT)
+    }
+
+    try {
+      await prisma.$transaction(async tx => {
+        const productOptionSets = await tx.productOptionSet.findMany({
+          where: { productId },
+          select: { optionSetId: true },
+        })
+        const optionSetIds = productOptionSets.map(item => item.optionSetId)
+
+        await tx.productOptionSet.deleteMany({ where: { productId } })
+        await tx.optionSetElement.deleteMany({ where: { optionSetId: { in: optionSetIds } } })
+        await tx.optionSet.deleteMany({ where: { id: { in: optionSetIds } } })
+
+        await tx.promotionProduct.deleteMany({ where: { productId } })
+        await tx.productRecipe.deleteMany({ where: { productId } })
+        await tx.cartItem.deleteMany({ where: { productId } })
+
+        await tx.product.delete({ where: { id: productId } })
+      })
+    } catch (error) {
+      // An order item (or another child row) can appear between the count above
+      // and this delete. The FK then rejects the delete, so report the same
+      // conflict the pre-check would have rather than a 500.
+      if (isRequiredRelationViolation(error)) {
+        throw new AppError(Messages.PRODUCT_IN_USE, HttpStatus.CONFLICT)
+      }
+      throw error
+    }
+
+    return { id: productId }
   },
 
   mapProducts(products: any[]) {
@@ -371,6 +347,8 @@ export const productService = {
       isAvailable: p.isAvailable,
       priceMode: p.priceMode,
       type: p.type,
+      // True once the product appears in an order — the client disables deletion.
+      cannotDelete: (p._count?.orderItems ?? 0) > 0,
       optionSets: p.optionSets.map((pos: any) => ({
         isRequired: pos.isRequired,
         optionSet: {

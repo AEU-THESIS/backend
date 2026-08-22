@@ -57,4 +57,12 @@ export const productController = {
     const product = await productService.update(productId, shopId, parsed.data)
     return sendSuccess(res, product, 'Product updated successfully', HttpStatus.OK)
   }),
+
+  remove: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { id: productId } = idParamSchema.parse(req.params)
+
+    await productService.remove(productId, shopId)
+    return sendSuccess(res, null, Messages.PRODUCT_DELETED, HttpStatus.OK)
+  }),
 }

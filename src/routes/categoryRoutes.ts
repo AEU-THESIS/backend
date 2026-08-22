@@ -26,4 +26,11 @@ router.put(
   requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
   categoryController.update
 )
+
+router.delete(
+  '/:id',
+  authenticate,
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER]),
+  categoryController.remove
+)
 export default router
