@@ -18,6 +18,7 @@ import {
 } from '../validations/orderValidation'
 import { AppError } from '../utils/appError'
 import { orderSseController } from './orderSseController'
+import { telegram, buildCustomerStatusNotification } from '../utils/telegram'
 
 export const orderController = {
   create: catchAsync(async (req: Request, res: Response) => {
@@ -97,6 +98,17 @@ export const orderController = {
     // Broadcast the status update to all connected screens instantly
     orderSseController.safeBroadcastToShop(shopId, 'order_updated', updatedOrder)
 
+    // Sync Telegram group notification message & buttons in real time
+    telegram.syncOrderGroupMessage(updatedOrder).catch(() => {})
+
+    // Send direct notification to customer if ordered via Telegram Mini App
+    if (updatedOrder.orderType === 'pre_order' && updatedOrder.telegramUserId) {
+      const msg = buildCustomerStatusNotification(updatedOrder, parsed.data.status)
+      if (msg) {
+        telegram.notifyCustomer(updatedOrder.telegramUserId, msg).catch(() => {})
+      }
+    }
+
     return sendSuccess(res, updatedOrder, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
   }),
 
@@ -118,6 +130,16 @@ export const orderController = {
     // Push the reversed order to every connected screen so boards/history refresh live.
     orderSseController.safeBroadcastToShop(shopId, 'order_updated', order)
 
+    // Sync Telegram group notification message & buttons in real time
+    telegram.syncOrderGroupMessage(order).catch(() => {})
+
+    if (order.orderType === 'pre_order' && order.telegramUserId) {
+      const msg = buildCustomerStatusNotification(order, 'canceled')
+      if (msg) {
+        telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
+      }
+    }
+
     return sendSuccess(res, order, Messages.ORDER_VOIDED, HttpStatus.OK)
   }),
 
@@ -134,6 +156,17 @@ export const orderController = {
 
     const order = await orderService.rejectPreOrder(shopId, params.data.id)
     orderSseController.safeBroadcastToShop(shopId, 'order_updated', order)
+
+    // Sync Telegram group notification message & buttons in real time
+    telegram.syncOrderGroupMessage(order).catch(() => {})
+
+    // Send direct notification to customer if ordered via Telegram Mini App
+    if (order.orderType === 'pre_order' && order.telegramUserId) {
+      const msg = buildCustomerStatusNotification(order, 'rejected')
+      if (msg) {
+        telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
+      }
+    }
 
     return sendSuccess(res, order, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
   }),
@@ -155,6 +188,9 @@ export const orderController = {
     )
 
     orderSseController.safeBroadcastToShop(shopId, 'order_updated', order)
+
+    // Sync Telegram group notification message & buttons in real time
+    telegram.syncOrderGroupMessage(order).catch(() => {})
 
     return sendSuccess(res, order, Messages.ORDER_ITEM_CANCELED, HttpStatus.OK)
   }),

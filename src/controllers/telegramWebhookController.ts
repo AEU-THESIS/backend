@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import { Request, Response } from 'express'
 import { orderService } from '../services/orderService'
 import { orderSseController } from './orderSseController'
-import { telegram, buildPreOrderMessage } from '../utils/telegram'
+import { telegram, buildPreOrderMessage, buildCustomerStatusNotification } from '../utils/telegram'
 
 /** Constant-time string compare that tolerates length mismatch without throwing. */
 function safeEqual(a: string, b: string): boolean {
@@ -100,6 +100,15 @@ export const telegramWebhookController = {
       if (chatId && messageId) {
         const { text, replyMarkup } = buildPreOrderMessage(fullOrder, currency)
         await telegram.editMessageText(chatId, messageId, text, replyMarkup)
+      }
+
+      // Notify customer if placed through Telegram Mini App
+      if (fullOrder.orderType === 'pre_order' && fullOrder.telegramUserId) {
+        const nextSt = action === 'reject' ? 'rejected' : ACTION_TO_STATUS[action]
+        const customerMsg = buildCustomerStatusNotification(fullOrder, nextSt, currency)
+        if (customerMsg) {
+          telegram.notifyCustomer(fullOrder.telegramUserId, customerMsg).catch(() => {})
+        }
       }
     } catch (err) {
       console.error('⚠️ [telegram webhook] failed to handle callback:', err)

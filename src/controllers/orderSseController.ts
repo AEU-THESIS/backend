@@ -1,7 +1,16 @@
 import { Request, Response, HttpStatus, Messages } from '../core/Controller'
+import { prisma } from '../core/Service'
+import { verifyTelegramInitData } from '../utils/telegram'
 
-// Map of shopId -> Array of active client responses
+// Map of shopId -> Array of active authenticated staff client responses
 const activeClients = new Map<number, Response[]>()
+
+// Map of shopId -> Array of active public customer client responses
+interface PublicClient {
+  res: Response
+  telegramUserId?: string
+}
+const publicClients = new Map<number, PublicClient[]>()
 
 export const orderSseController = {
   subscribe(req: Request, res: Response) {
@@ -31,7 +40,7 @@ export const orderSseController = {
     activeClients.set(shopId, clients)
 
     console.log(
-      `📡 Client connected to SSE stream for Shop #${shopId}. Active clients: ${clients.length}`
+      `📡 Staff connected to SSE stream for Shop #${shopId}. Active staff clients: ${clients.length}`
     )
 
     // Keepalive ping to prevent proxy timeout
@@ -52,28 +61,117 @@ export const orderSseController = {
       }
 
       console.log(
-        `🔌 Client disconnected from SSE stream for Shop #${shopId}. Remaining: ${filteredClients.length}`
+        `🔌 Staff disconnected from SSE stream for Shop #${shopId}. Remaining: ${filteredClients.length}`
       )
     })
   },
 
-  broadcastToShop(shopId: number, event: 'order_created' | 'order_updated', orderData: any) {
-    const clients = activeClients.get(shopId)
-
-    if (!clients || clients.length === 0) {
+  async subscribePublic(req: Request, res: Response) {
+    const slug = String(req.params.slug ?? '')
+    if (!slug) {
+      res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: 'Shop slug required' })
       return
     }
 
-    const payload = `event: ${event}\ndata: ${JSON.stringify(orderData)}\n\n`
+    let shopId = 0
+    try {
+      const shop = await prisma.shop.findUnique({
+        where: { slug },
+        select: { id: true },
+      })
+      if (shop) {
+        shopId = shop.id
+      }
+    } catch {
+      // ignore
+    }
 
-    // Dispatch events to all active devices
-    clients.forEach(client => {
-      try {
-        client.write(payload)
-      } catch (error) {
-        console.error(`❌ Failed to send SSE payload to a client in Shop #${shopId}`, error)
+    if (!shopId) {
+      res.status(HttpStatus.NOT_FOUND).json({ success: false, message: Messages.SHOP_NOT_FOUND })
+      return
+    }
+
+    let telegramUserId: string | undefined
+
+    if (req.telegramUser?.id) {
+      telegramUserId = String(req.telegramUser.id)
+    } else {
+      const initData = String(req.query.initData ?? '')
+      if (initData) {
+        const verified = verifyTelegramInitData(initData, process.env.TELEGRAM_BOT_TOKEN ?? '')
+        if (verified) telegramUserId = verified.id
+      }
+    }
+
+    if (
+      !telegramUserId &&
+      process.env.NODE_ENV !== 'production' &&
+      process.env.TELEGRAM_ALLOW_DEV_INITDATA === 'true' &&
+      req.query.telegramUserId
+    ) {
+      telegramUserId = String(req.query.telegramUserId)
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+
+    res.write(`data: ${JSON.stringify({ status: 'connected', shopId, role: 'customer' })}\n\n`)
+
+    const currentPublic = publicClients.get(shopId) || []
+    currentPublic.push({ res, telegramUserId })
+    publicClients.set(shopId, currentPublic)
+
+    const keepAliveInterval = setInterval(() => {
+      res.write(':keepalive\n\n')
+    }, 25000)
+
+    req.on('close', () => {
+      clearInterval(keepAliveInterval)
+      const list = publicClients.get(shopId) || []
+      const filtered = list.filter(c => c.res !== res)
+      if (filtered.length > 0) {
+        publicClients.set(shopId, filtered)
+      } else {
+        publicClients.delete(shopId)
       }
     })
+  },
+
+  broadcastToShop(shopId: number, event: 'order_created' | 'order_updated', orderData: any) {
+    const payload = `event: ${event}\ndata: ${JSON.stringify(orderData)}\n\n`
+
+    // Dispatch to staff clients
+    const clients = activeClients.get(shopId)
+    if (clients && clients.length > 0) {
+      clients.forEach(client => {
+        try {
+          client.write(payload)
+        } catch (error) {
+          console.error(`❌ Failed to send SSE payload to staff in Shop #${shopId}`, error)
+        }
+      })
+    }
+
+    // Dispatch to public customer clients
+    const pubList = publicClients.get(shopId)
+    if (pubList && pubList.length > 0) {
+      pubList.forEach(client => {
+        // If client specified telegramUserId, only send if matching or broadcast
+        if (
+          !client.telegramUserId ||
+          !orderData.telegramUserId ||
+          String(orderData.telegramUserId) === client.telegramUserId
+        ) {
+          try {
+            client.res.write(payload)
+          } catch {
+            // client disconnected
+          }
+        }
+      })
+    }
   },
 
   safeBroadcastToShop(shopId: number, event: 'order_created' | 'order_updated', orderData: any) {

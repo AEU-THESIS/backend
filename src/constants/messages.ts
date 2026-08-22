@@ -80,4 +80,5 @@ export const Messages = {
   CUSTOMER_BLOCKED: 'You are temporarily blocked from placing orders. Please contact the café.',
   CUSTOMER_BLOCKED_ADDED: 'Customer blocked',
   CUSTOMER_BLOCK_REMOVED: 'Customer unblocked',
+  SHOP_CLOSED: 'The shop is currently closed. Please check back later.',
 } as const

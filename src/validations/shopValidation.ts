@@ -51,6 +51,8 @@ export const updateShopSettingsSchema = z
     receipt_footer: optionalText,
     isOrderManagementEnabled: z.boolean().optional(),
     is_order_management_enabled: z.boolean().optional(),
+    isShopClosed: z.boolean().optional(),
+    is_shop_closed: z.boolean().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -61,6 +63,7 @@ export const updateShopSettingsSchema = z
       ['exchangeRate', 'exchange_rate'],
       ['receiptFooter', 'receipt_footer'],
       ['isOrderManagementEnabled', 'is_order_management_enabled'],
+      ['isShopClosed', 'is_shop_closed'],
     ] as const
 
     for (const [camelCaseKey, snakeCaseKey] of aliasPairs) {
@@ -106,6 +109,12 @@ export const updateShopSettingsSchema = z
     }),
     ...(data.is_order_management_enabled !== undefined && {
       isOrderManagementEnabled: data.is_order_management_enabled,
+    }),
+    ...(data.isShopClosed !== undefined && {
+      isShopClosed: data.isShopClosed,
+    }),
+    ...(data.is_shop_closed !== undefined && {
+      isShopClosed: data.is_shop_closed,
     }),
   }))
   .refine(data => Object.keys(data).length > 0, {

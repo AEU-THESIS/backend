@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { publicOrderController } from '../controllers/publicOrderController'
+import { orderSseController } from '../controllers/orderSseController'
 import { telegramWebhookController } from '../controllers/telegramWebhookController'
 import { requireTelegramMiniApp } from '../middlewares/telegramMiniAppMiddleware'
 import { publicOrderLimiter, publicReadLimiter } from '../middlewares/rateLimiterMiddleware'
@@ -35,5 +36,8 @@ router.get(
   publicReadLimiter,
   publicOrderController.getMyOrders
 )
+
+// Public SSE stream for real-time order status updates (replaces continuous polling)
+router.get('/shops/:slug/orders/sse', (req, res) => orderSseController.subscribePublic(req, res))
 
 export default router
