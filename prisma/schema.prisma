@@ -73,6 +73,7 @@ model Shop {
   exchangeRate             Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
   receiptFooter            String?  @map("receipt_footer") @db.Text
   isOrderManagementEnabled Boolean  @default(true) @map("is_order_management_enabled")
+  isShopClosed             Boolean  @default(false) @map("is_shop_closed")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
@@ -522,6 +523,8 @@ model Order {
   // initData). Null for staff-created POS orders.
   telegramUserId   String?  @map("telegram_user_id")
   telegramUsername String?  @map("telegram_username")
+  telegramChatId   String?  @map("telegram_chat_id")
+  telegramMessageId Int?    @map("telegram_message_id")
 
   totalAmount          Decimal @map("total_amount") @db.Decimal(10, 2)
   discountAmount       Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)

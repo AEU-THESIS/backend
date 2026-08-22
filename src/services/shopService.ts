@@ -14,6 +14,7 @@ const shopSettingsSelect = {
   exchangeRate: true,
   receiptFooter: true,
   isOrderManagementEnabled: true,
+  isShopClosed: true,
   createdAt: true,
   updatedAt: true,
 } as const
