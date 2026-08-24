@@ -2,12 +2,14 @@ name: Deploy Backend (Production)
 
 on:
   push:
-    branches: ['main']
-    tags: ['v*']
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+      - '!v*-staging*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing Docker image tag to deploy (e.g. v1.0.0 or staging-abc1234)'
+        description: 'Existing Docker image tag to deploy (e.g. v1.0.0)'
         required: false
 
 env:
@@ -103,7 +105,7 @@ jobs:
             set -euo pipefail
             APP_DIR="${{ secrets.APP_DIR }}"
             if [ -z "$APP_DIR" ]; then
-              APP_DIR="$HOME/projects/rountin-cafe/prod"
+              APP_DIR="$HOME/projects/rountine-cafe/production"
             fi
 
             echo "==> Deploying backend to Production: $APP_DIR"
@@ -116,3 +118,17 @@ jobs:
 
             chmod +x deploy.sh || true
             IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}" SERVICE=backend ./deploy.sh
+
+      - name: Send Telegram Notification
+        if: always() && secrets.TELEGRAM_BOT_TOKEN != ''
+        run: |
+          STATUS="${{ job.status == 'success' && '✅ Succeeded' || '❌ Failed' }}"
+          TEXT="<b>🟢 Backend Production Deploy (${STATUS})</b>%0A<b>Release Tag:</b> <code>${{ needs.build-and-push.outputs.image_tag }}</code>%0A<b>Triggered by:</b> ${{ github.actor }}%0A<b>URL:</b> https://routinecafe.site"
+
+          TOPIC_PARAM=""
+          if [ -n "${{ secrets.TELEGRAM_TOPIC_ID }}" ]; then
+            TOPIC_PARAM="&message_thread_id=${{ secrets.TELEGRAM_TOPIC_ID }}"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true
