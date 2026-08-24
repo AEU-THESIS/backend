@@ -65,3 +65,22 @@ jobs:
             exit 1
           fi
           echo "OK: .env is not tracked."
+
+  notify-dev-merge:
+    name: Telegram Alert (dev merge)
+    needs: [verify, docker-build, secret-scan]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && secrets.TELEGRAM_BOT_TOKEN != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram notification
+        run: |
+          STATUS="${{ (contains(needs.verify.result, 'failure') || contains(needs.docker-build.result, 'failure') || contains(needs.secret-scan.result, 'failure')) && '❌ Failed' || '✅ Succeeded' }}"
+          TEXT="<b>🚀 Backend CI (${STATUS})</b>%0A<b>Branch:</b> <code>dev</code> (Merged)%0A<b>Author:</b> ${{ github.actor }}%0A<b>Commit:</b> <a href=\"https://github.com/${{ github.repository }}/commit/${{ github.sha }}\">${{ github.sha }}</a>"
+
+          TOPIC_PARAM=""
+          if [ -n "${{ secrets.TELEGRAM_TOPIC_ID }}" ]; then
+            TOPIC_PARAM="&message_thread_id=${{ secrets.TELEGRAM_TOPIC_ID }}"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true

@@ -118,3 +118,17 @@ jobs:
 
             chmod +x deploy.sh || true
             IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}" SERVICE=backend ./deploy.sh
+
+      - name: Send Telegram Notification
+        if: always() && secrets.TELEGRAM_BOT_TOKEN != ''
+        run: |
+          STATUS="${{ job.status == 'success' && '✅ Succeeded' || '❌ Failed' }}"
+          TEXT="<b>🟢 Backend Production Deploy (${STATUS})</b>%0A<b>Release Tag:</b> <code>${{ needs.build-and-push.outputs.image_tag }}</code>%0A<b>Triggered by:</b> ${{ github.actor }}%0A<b>URL:</b> https://routinecafe.site"
+
+          TOPIC_PARAM=""
+          if [ -n "${{ secrets.TELEGRAM_TOPIC_ID }}" ]; then
+            TOPIC_PARAM="&message_thread_id=${{ secrets.TELEGRAM_TOPIC_ID }}"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true
