@@ -150,6 +150,10 @@ Thumbs.db
 # Seed Credentials
 .seed-password
 
-certs/*.key
-certs/*.pem
+# SSL Certificates & Keys
+cert/
+cert/*
+certs/
 certs/*
+*.key
+*.pem
