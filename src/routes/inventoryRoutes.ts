@@ -17,6 +17,7 @@ router.use(requireRoles([ROLES.ADMIN, ROLES.MANAGER]))
 
 router.get('/', inventoryController.getAll)
 router.get('/valuations', inventoryController.getValuation)
+router.get('/expense-report', inventoryController.getExpenseReport)
 router.post('/', upload.single('image'), inventoryController.create)
 router.put('/:id', upload.single('image'), inventoryController.update)
 router.delete('/:id', inventoryController.delete)

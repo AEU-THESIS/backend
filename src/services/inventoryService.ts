@@ -3,6 +3,7 @@ import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   AdjustInventoryItemInput,
   CreateInventoryItemInput,
+  InventoryExpenseReportQueryInput,
   InventoryHistoryQueryInput,
   InventoryQueryInput,
   UpdateInventoryItemInput,
@@ -15,6 +16,7 @@ import {
   type DecimalLike,
 } from './inventoryCost'
 import { notificationService } from './notificationService'
+import { toShopDateString } from '../utils/date'
 
 const DEFAULT_COST_CURRENCY = '$'
 
@@ -432,19 +434,27 @@ export const inventoryService = {
     const dateFilter: { gte?: Date; lte?: Date } = {}
     if (query.from) dateFilter.gte = new Date(query.from)
     if (query.to) dateFilter.lte = new Date(query.to)
-    const where = {
+    // `baseWhere` (date range only) drives the Total In/Out summary, which
+    // stays true to the whole period regardless of the type filter. `where`
+    // additionally narrows by type and drives the returned rows/count/pages,
+    // so filtering to "In" only changes what's listed, not the KPI totals.
+    const baseWhere = {
       ingredientId: id,
       ...(dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {}),
+    }
+    const where = {
+      ...baseWhere,
+      ...(query.type && { transactionType: query.type }),
     }
 
     const [total, addsSum, removesSum, logs] = await Promise.all([
       prisma.ingredientLog.count({ where }),
       prisma.ingredientLog.aggregate({
-        where: { ...where, transactionType: 'add' },
+        where: { ...baseWhere, transactionType: 'add' },
         _sum: { quantityChanged: true },
       }),
       prisma.ingredientLog.aggregate({
-        where: { ...where, transactionType: 'remove' },
+        where: { ...baseWhere, transactionType: 'remove' },
         _sum: { quantityChanged: true },
       }),
       prisma.ingredientLog.findMany({
@@ -492,5 +502,122 @@ export const inventoryService = {
         totalOut: serialize(removesSum._sum.quantityChanged ?? 0),
       },
     }
+  },
+
+  // Purchase spend over a date range — how much was spent restocking, not
+  // profit or cost of goods sold. Only stock-in ('add') logs count: removals
+  // are consumption, not spend. Reuses the exact same quantity x unitCost
+  // figure the history endpoint reports as `value`, so the two always agree
+  // for the same range. Grouped by day (chart) or by ingredient (breakdown
+  // table) per the caller's request — bucketing by day uses the shop's own
+  // calendar, not the server's, so a late-night purchase lands on the café's
+  // calendar day rather than shifting to the next one.
+  async getExpenseReport(shopId: number, query: InventoryExpenseReportQueryInput) {
+    const start = new Date(query.startDate)
+    const end = new Date(query.endDate)
+
+    const logs = await prisma.ingredientLog.findMany({
+      where: {
+        transactionType: 'add',
+        createdAt: { gte: start, lte: end },
+        ingredient: { shopId },
+      },
+      select: {
+        createdAt: true,
+        quantityChanged: true,
+        unitCost: true,
+        ingredientId: true,
+        ingredient: { select: { name: true, unitOfMeasure: true, costCurrency: true } },
+      },
+    })
+
+    const spendOf = (log: { quantityChanged: Prisma.Decimal; unitCost: Prisma.Decimal | null }) =>
+      toDecimal(log.quantityChanged).times(toDecimal(log.unitCost ?? 0))
+
+    const totalSpend = logs.reduce((sum, log) => sum.plus(spendOf(log)), toDecimal(0))
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { currencySymbol: true },
+    })
+    const currency =
+      logs[0]?.ingredient.costCurrency || shop?.currencySymbol || DEFAULT_COST_CURRENCY
+
+    const period = { startDate: start.toISOString(), endDate: end.toISOString() }
+    const base = {
+      period,
+      totalSpend: roundMoney(totalSpend).toNumber(),
+      purchaseCount: logs.length,
+      currency,
+    }
+
+    if (query.groupBy === 'raw') {
+      // `date` is the shop-local calendar day (not the raw UTC instant), so a
+      // purchase logged just after UTC midnight lands on the same day — and
+      // month — as the shop's own "day" grouping reports it under.
+      const data = [...logs]
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map(log => ({
+          date: toShopDateString(log.createdAt),
+          ingredientId: log.ingredientId,
+          name: log.ingredient.name,
+          unitOfMeasure: log.ingredient.unitOfMeasure,
+          quantity: serialize(log.quantityChanged),
+          unitCost: serialize(log.unitCost ?? 0),
+          totalCost: roundMoney(spendOf(log)).toNumber(),
+        }))
+
+      return { ...base, groupBy: 'raw' as const, data }
+    }
+
+    if (query.groupBy === 'ingredient') {
+      const byIngredient = new Map<
+        number,
+        {
+          name: string
+          unitOfMeasure: string
+          quantity: Prisma.Decimal
+          totalSpend: Prisma.Decimal
+        }
+      >()
+
+      for (const log of logs) {
+        const existing = byIngredient.get(log.ingredientId) ?? {
+          name: log.ingredient.name,
+          unitOfMeasure: log.ingredient.unitOfMeasure,
+          quantity: toDecimal(0),
+          totalSpend: toDecimal(0),
+        }
+        existing.quantity = existing.quantity.plus(toDecimal(log.quantityChanged))
+        existing.totalSpend = existing.totalSpend.plus(spendOf(log))
+        byIngredient.set(log.ingredientId, existing)
+      }
+
+      const data = Array.from(byIngredient.entries())
+        .map(([ingredientId, row]) => ({
+          ingredientId,
+          name: row.name,
+          unitOfMeasure: row.unitOfMeasure,
+          quantity: serialize(row.quantity),
+          totalSpend: roundMoney(row.totalSpend).toNumber(),
+        }))
+        .sort((a, b) => b.totalSpend - a.totalSpend)
+
+      return { ...base, groupBy: 'ingredient' as const, data }
+    }
+
+    const byDay = new Map<string, Prisma.Decimal>()
+    for (const log of logs) {
+      const dateKey = toShopDateString(log.createdAt)
+      byDay.set(dateKey, (byDay.get(dateKey) ?? toDecimal(0)).plus(spendOf(log)))
+    }
+
+    const data = Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, spend]) => {
+        const [, month, day] = date.split('-').map(Number)
+        return { date, label: `${month}/${day}`, totalSpend: roundMoney(spend).toNumber() }
+      })
+
+    return { ...base, groupBy: 'day' as const, data }
   },
 }

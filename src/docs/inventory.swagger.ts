@@ -116,6 +116,61 @@
  *       401: { description: Unauthorized }
  *       403: { description: Forbidden (requires Admin or Manager) }
  *
+ * /api/inventories/expense-report:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Purchase spend over a date range (Admin, Manager)
+ *     description: >
+ *       Totals stock-in ("add") purchase cost between startDate and endDate. This
+ *       is purchase spend only — not profit or cost of goods sold. Grouped by day
+ *       (for a spend-over-time chart) or by ingredient (for a breakdown table);
+ *       fetch both groupings as separate requests to build a full report page.
+ *       Day buckets use the shop's own timezone, not the server's.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: endDate
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: groupBy
+ *         schema: { type: string, enum: [day, ingredient, raw], default: day }
+ *         description: "'raw' returns individual purchase records, used to build the Excel export."
+ *     responses:
+ *       200:
+ *         description: Purchase spend for the range
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     period:
+ *                       type: object
+ *                       properties:
+ *                         startDate: { type: string, format: date-time }
+ *                         endDate: { type: string, format: date-time }
+ *                     totalSpend: { type: number, example: 214.5 }
+ *                     purchaseCount: { type: integer, example: 12 }
+ *                     currency: { type: string, example: "$" }
+ *                     groupBy: { type: string, enum: [day, ingredient, raw] }
+ *                     data:
+ *                       type: array
+ *                       description: One row per day (date/label/totalSpend), per ingredient (ingredientId/name/unitOfMeasure/quantity/totalSpend), or one row per purchase (date/ingredientId/name/unitOfMeasure/quantity/unitCost/totalCost) when groupBy=raw, depending on groupBy.
+ *                       items: { type: object }
+ *       400: { description: Validation failed (bad range or unknown query param) }
+ *       401: { description: Unauthorized }
+ *       403: { description: Forbidden (requires Admin or Manager) }
+ *
  * /api/inventories/{id}:
  *   put:
  *     tags: [Inventory]
@@ -217,6 +272,10 @@
  *         name: to
  *         schema: { type: string, format: date-time }
  *         description: Inclusive range end (ISO 8601)
+ *       - in: query
+ *         name: type
+ *         schema: { type: string, enum: [add, remove] }
+ *         description: Restrict the returned rows to stock-ins ("add") or removals ("remove"); omit for both. Does not affect the totalIn/totalOut summary, which always covers the full range.
  *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }

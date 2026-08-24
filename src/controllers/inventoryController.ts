@@ -10,6 +10,7 @@ import { idParamSchema } from '../validations/commonValidation'
 import {
   adjustInventoryItemSchema,
   createInventoryItemSchema,
+  inventoryExpenseReportQuerySchema,
   inventoryHistoryQuerySchema,
   inventoryQuerySchema,
   updateInventoryItemSchema,
@@ -67,5 +68,11 @@ export const inventoryController = {
     const query = inventoryHistoryQuerySchema.parse(req.query)
     const history = await inventoryService.getHistory(id, req.user!.shop_id, query)
     return sendSuccess(res, history)
+  }),
+
+  getExpenseReport: catchAsync(async (req: Request, res: Response) => {
+    const query = inventoryExpenseReportQuerySchema.parse(req.query)
+    const report = await inventoryService.getExpenseReport(req.user!.shop_id, query)
+    return sendSuccess(res, report)
   }),
 }

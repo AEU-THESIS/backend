@@ -162,6 +162,8 @@ export const inventoryHistoryQuerySchema = z
   .strictObject({
     from: isoDateTime.optional(),
     to: isoDateTime.optional(),
+    // Restrict to stock-ins only, removals only, or omit for both.
+    type: z.enum(['add', 'remove']).optional(),
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(10),
   })
@@ -177,8 +179,33 @@ export const inventoryHistoryQuerySchema = z
     }
   })
 
+// Expense report is filtered by an explicit date range and grouped either by
+// day (for the spend-over-time chart) or by ingredient (for the breakdown
+// table). The two groupings are fetched as separate requests rather than one
+// combined payload, so each stays a simple, independently-cacheable query.
+export const inventoryExpenseReportQuerySchema = z
+  .strictObject({
+    startDate: isoDateTime,
+    endDate: isoDateTime,
+    // 'raw' returns individual purchase records (unaggregated) — used to build
+    // the Excel export, which needs per-transaction rows rather than totals.
+    groupBy: z.enum(['day', 'ingredient', 'raw']).default('day'),
+  })
+  .superRefine((data, ctx) => {
+    if (Date.parse(data.startDate) > Date.parse(data.endDate)) {
+      ;(['startDate', 'endDate'] as const).forEach(path => {
+        ctx.addIssue({
+          code: 'custom',
+          path: [path],
+          message: 'startDate must be earlier than or equal to endDate',
+        })
+      })
+    }
+  })
+
 export type CreateInventoryItemInput = z.infer<typeof createInventoryItemSchema>
 export type UpdateInventoryItemInput = z.infer<typeof updateInventoryItemSchema>
 export type AdjustInventoryItemInput = z.infer<typeof adjustInventoryItemSchema>
 export type InventoryQueryInput = z.infer<typeof inventoryQuerySchema>
 export type InventoryHistoryQueryInput = z.infer<typeof inventoryHistoryQuerySchema>
+export type InventoryExpenseReportQueryInput = z.infer<typeof inventoryExpenseReportQuerySchema>
