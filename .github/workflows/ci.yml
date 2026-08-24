@@ -73,8 +73,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send Telegram notification
+        env:
+          VERIFY_RES: ${{ needs.verify.result }}
+          BUILD_RES: ${{ needs.docker-build.result }}
+          SCAN_RES: ${{ needs.secret-scan.result }}
         run: |
-          STATUS="${{ (contains(needs.verify.result, 'failure') || contains(needs.docker-build.result, 'failure') || contains(needs.secret-scan.result, 'failure')) && '❌ Failed' || '✅ Succeeded' }}"
+          if [ "$VERIFY_RES" = "success" ] && [ "$BUILD_RES" = "success" ] && [ "$SCAN_RES" = "success" ]; then
+            STATUS="✅ Succeeded"
+          else
+            STATUS="❌ Failed"
+          fi
+
           TEXT="<b>🚀 Backend CI (${STATUS})</b>%0A<b>Branch:</b> <code>dev</code> (Merged)%0A<b>Author:</b> ${{ github.actor }}%0A<b>Commit:</b> <a href=\"https://github.com/${{ github.repository }}/commit/${{ github.sha }}\">${{ github.sha }}</a>"
 
           TOPIC_PARAM=""

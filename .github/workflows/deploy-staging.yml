@@ -120,9 +120,17 @@ jobs:
 
       - name: Send Telegram Notification
         if: always() && secrets.TELEGRAM_BOT_TOKEN != ''
+        env:
+          JOB_STATUS: ${{ job.status }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
-          STATUS="${{ job.status == 'success' && '✅ Succeeded' || '❌ Failed' }}"
-          TEXT="<b>🟡 Backend Staging Deploy (${STATUS})</b>%0A<b>Tag:</b> <code>${{ needs.build-and-push.outputs.image_tag }}</code>%0A<b>Triggered by:</b> ${{ github.actor }}%0A<b>URL:</b> https://staging.routinecafe.site"
+          if [ "$JOB_STATUS" = "success" ]; then
+            STATUS="✅ Succeeded"
+          else
+            STATUS="❌ Failed"
+          fi
+
+          TEXT="<b>🟡 Backend Staging Deploy (${STATUS})</b>%0A<b>Tag:</b> <code>${IMAGE_TAG}</code>%0A<b>Triggered by:</b> ${{ github.actor }}%0A<b>URL:</b> https://staging.routinecafe.site"
 
           TOPIC_PARAM=""
           if [ -n "${{ secrets.TELEGRAM_TOPIC_ID }}" ]; then
