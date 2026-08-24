@@ -126,11 +126,24 @@ jobs:
           TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
           JOB_STATUS: ${{ job.status }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          ACTOR: ${{ github.actor }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "Telegram credentials not configured. Skipping notification."
             exit 0
           fi
+
+          function map_user() {
+            case "$1" in
+              "SORIYAHO") echo "@yaIssMe" ;;
+              "Visal2442") echo "@Sork_Visal" ;;
+              "Johnrak11") echo "@johnrak" ;;
+              "seangengise") echo "@ith_seang_eng" ;;
+              *) echo "@$1" ;;
+            esac
+          }
+
+          TG_USER=$(map_user "$ACTOR")
 
           if [ "$JOB_STATUS" = "success" ]; then
             STATUS="✅ Succeeded"
@@ -138,12 +151,18 @@ jobs:
             STATUS="❌ Failed"
           fi
 
-          TEXT="<b>🟡 Backend Staging Deploy (${STATUS})</b>%0A<b>Tag:</b> <code>${IMAGE_TAG}</code>%0A<b>Triggered by:</b> ${{ github.actor }}%0A<b>URL:</b> https://staging.routinecafe.site"
+          MESSAGE="🟡 <b>Backend Staging Deployed (${STATUS})</b>\n\n- 🏷️ <b>Tag:</b> <code>${IMAGE_TAG}</code>\n- 👤 <b>Triggered by:</b> ${TG_USER}\n- 🌐 <b>URL:</b> <a href=\"https://staging.routinecafe.site\">https://staging.routinecafe.site</a>"
 
-          TOPIC_PARAM=""
-          if [ -n "$TELEGRAM_TOPIC_ID" ]; then
-            TOPIC_PARAM="&message_thread_id=${TELEGRAM_TOPIC_ID}"
-          fi
+          JSON_PAYLOAD=$(jq -n \
+            --arg chat_id "$TELEGRAM_CHAT_ID" \
+            --arg topic_id "$TELEGRAM_TOPIC_ID" \
+            --arg text "$(echo -e "$MESSAGE")" \
+            '{
+              chat_id: $chat_id,
+              parse_mode: "HTML",
+              text: $text
+            } + (if $topic_id != "" then {message_thread_id: $topic_id} else {} end)')
 
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" >/dev/null || true
