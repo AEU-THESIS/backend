@@ -67,20 +67,71 @@ jobs:
           echo "OK: .env is not tracked."
 
   notify-dev-merge:
-    name: Telegram Alert (dev merge)
+    name: Telegram Notification (dev merge)
     needs: [verify, docker-build, secret-scan]
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && secrets.TELEGRAM_BOT_TOKEN != ''
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     steps:
-      - name: Send Telegram notification
+      - name: Send Telegram Hype Notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_URL: ${{ github.event.head_commit.url }}
+          ACTOR: ${{ github.actor }}
+          VERIFY_RES: ${{ needs.verify.result }}
+          BUILD_RES: ${{ needs.docker-build.result }}
+          SCAN_RES: ${{ needs.secret-scan.result }}
         run: |
-          STATUS="${{ (contains(needs.verify.result, 'failure') || contains(needs.docker-build.result, 'failure') || contains(needs.secret-scan.result, 'failure')) && '❌ Failed' || '✅ Succeeded' }}"
-          TEXT="<b>🚀 Backend CI (${STATUS})</b>%0A<b>Branch:</b> <code>dev</code> (Merged)%0A<b>Author:</b> ${{ github.actor }}%0A<b>Commit:</b> <a href=\"https://github.com/${{ github.repository }}/commit/${{ github.sha }}\">${{ github.sha }}</a>"
-
-          TOPIC_PARAM=""
-          if [ -n "${{ secrets.TELEGRAM_TOPIC_ID }}" ]; then
-            TOPIC_PARAM="&message_thread_id=${{ secrets.TELEGRAM_TOPIC_ID }}"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram credentials not configured. Skipping notification."
+            exit 0
           fi
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true
+          function map_user() {
+            case "$1" in
+              "SORIYAHO") echo "@yaIssMe" ;;
+              "Visal2442") echo "@Sork_Visal" ;;
+              "Johnrak11") echo "@johnrak" ;;
+              "seangengise") echo "@ith_seang_eng" ;;
+              *) echo "@$1" ;;
+            esac
+          }
+
+          TG_USER=$(map_user "$ACTOR")
+          TASK_TITLE=$(echo "$COMMIT_MSG" | head -n 1)
+          if [ -z "$TASK_TITLE" ]; then
+            TASK_TITLE="Update dev branch"
+          fi
+
+          JIRA_ID=$(echo "$COMMIT_MSG" | grep -oE '[A-Z]+-[0-9]+' | head -n 1 || echo "")
+          TICKET_LINE=""
+          if [ -n "$JIRA_ID" ]; then
+            TICKET_LINE="🎫 <b>Jira Ticket:</b> <a href=\"https://vorakyun.atlassian.net/browse/$JIRA_ID\">$JIRA_ID</a>\n"
+          fi
+
+          if [ "$VERIFY_RES" = "success" ] && [ "$BUILD_RES" = "success" ] && [ "$SCAN_RES" = "success" ]; then
+            MESSAGE="Hello $TG_USER your PR was Merged to Dev (backend)! 🚀\n\n- 👤 <b>Merged By:</b> $TG_USER\n- 📌 <b>Task:</b> $TASK_TITLE\n${TICKET_LINE}- 🔗 <a href=\"$COMMIT_URL\">View Commit on GitHub</a>\n- 🚦 <b>CI Status:</b> ✅ Succeeded\n\nEveryone pull the latest code and check it out! 🔥"
+          else
+            MESSAGE="⚠️ <b>Backend CI Failed on Dev!</b> ❌\n\n- 👤 <b>Merged By:</b> $TG_USER\n- 📌 <b>Task:</b> $TASK_TITLE\n${TICKET_LINE}- 🔗 <a href=\"$COMMIT_URL\">View Commit on GitHub</a>\n- 🚦 <b>CI Status:</b> ❌ Failed (Please inspect Actions logs)"
+          fi
+
+          TOPIC_PARAM=""
+          if [ -n "$TELEGRAM_TOPIC_ID" ]; then
+            TOPIC_PARAM="\"message_thread_id\": \"$TELEGRAM_TOPIC_ID\","
+          fi
+
+          JSON_PAYLOAD=$(jq -n \
+            --arg chat_id "$TELEGRAM_CHAT_ID" \
+            --arg topic_id "$TELEGRAM_TOPIC_ID" \
+            --arg text "$(echo -e "$MESSAGE")" \
+            '{
+              chat_id: $chat_id,
+              parse_mode: "HTML",
+              text: $text
+            } + (if $topic_id != "" then {message_thread_id: $topic_id} else {} end)')
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" >/dev/null || true
