@@ -6,10 +6,10 @@ import { v4 as uuidv4 } from 'uuid'
 import path from 'path'
 import fs from 'fs'
 
-// Ensure upload directory exists
-const uploadDir = path.join(__dirname, '../../public/uploads')
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true })
+// Ensure upload directory exists (always anchored to process root / volume mount)
+export const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'public/uploads')
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true })
 }
 
 // Configure multer to store files in memory
@@ -34,7 +34,7 @@ export const upload = multerLib({
 
 export const processImage = async (buffer: Buffer): Promise<string> => {
   const filename = `${uuidv4()}.webp`
-  const filepath = path.join(uploadDir, filename)
+  const filepath = path.join(UPLOAD_DIR, filename)
 
   await sharp(buffer)
     .resize(400, 400, {
@@ -51,10 +51,10 @@ export const deleteImage = (imageUrl: string): void => {
   if (!imageUrl || !imageUrl.startsWith('/uploads/')) return
 
   const filename = path.basename(imageUrl)
-  const resolvedPath = path.resolve(uploadDir, filename)
+  const resolvedPath = path.resolve(UPLOAD_DIR, filename)
 
   // Security check: ensure the resolved path is strictly within the upload directory
-  if (!resolvedPath.startsWith(path.resolve(uploadDir))) {
+  if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR))) {
     console.warn(`Blocked deletion attempt for path outside uploads: ${resolvedPath}`)
     return
   }
