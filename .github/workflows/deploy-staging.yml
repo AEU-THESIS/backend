@@ -1,0 +1,168 @@
+name: Deploy Backend (Staging)
+
+on:
+  push:
+    tags:
+      - 'staging-*'
+      - 'v*-staging*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing Docker image tag to deploy (e.g. staging-v1.0.0)'
+        required: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/routin-cafe-backend
+
+concurrency:
+  group: deploy-staging-backend
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: 1. Verify & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run build
+
+  build-and-push:
+    name: 2. Build & Push Image (GHCR)
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate image tags
+        id: meta
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="staging-${GITHUB_SHA::7}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name
+        id: image
+        run: |
+          LOWERCASE_IMAGE=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=$LOWERCASE_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.image.outputs.name }}:staging
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  deploy:
+    name: 3. Deploy to Staging Server
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -euo pipefail
+            APP_DIR="${{ secrets.APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then
+              APP_DIR="$HOME/projects/rountine-cafe/staging"
+            fi
+
+            echo "==> Deploying backend to Staging: $APP_DIR"
+            cd "$APP_DIR"
+
+            if [ ! -f .env ]; then
+              echo "::error::.env is missing in $APP_DIR"
+              exit 1
+            fi
+
+            chmod +x deploy.sh || true
+            IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}" SERVICE=backend ./deploy.sh
+
+      - name: Send Telegram Notification
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          JOB_STATUS: ${{ job.status }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram credentials not configured. Skipping notification."
+            exit 0
+          fi
+
+          function map_user() {
+            case "$1" in
+              "SORIYAHO") echo "@yaIssMe" ;;
+              "Visal2442") echo "@Sork_Visal" ;;
+              "Johnrak11") echo "@johnrak" ;;
+              "seangengise") echo "@ith_seang_eng" ;;
+              *) echo "@$1" ;;
+            esac
+          }
+
+          TG_USER=$(map_user "$ACTOR")
+
+          if [ "$JOB_STATUS" = "success" ]; then
+            STATUS="✅ Succeeded"
+          else
+            STATUS="❌ Failed"
+          fi
+
+          MESSAGE="🟡 <b>Backend Staging Deployed (${STATUS})</b>\n\n- 🏷️ <b>Tag:</b> <code>${IMAGE_TAG}</code>\n- 👤 <b>Triggered by:</b> ${TG_USER}\n- 🌐 <b>URL:</b> <a href=\"https://staging.routinecafe.site\">https://staging.routinecafe.site</a>"
+
+          JSON_PAYLOAD=$(jq -n \
+            --arg chat_id "$TELEGRAM_CHAT_ID" \
+            --arg topic_id "$TELEGRAM_TOPIC_ID" \
+            --arg text "$(echo -e "$MESSAGE")" \
+            '{
+              chat_id: $chat_id,
+              parse_mode: "HTML",
+              text: $text
+            } + (if $topic_id != "" then {message_thread_id: $topic_id} else {} end)')
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" >/dev/null || true

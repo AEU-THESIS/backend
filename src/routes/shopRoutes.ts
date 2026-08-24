@@ -1,15 +1,26 @@
-import { Router } from "express";
-import { shopController } from "../controllers/shopController";
-import { authenticate } from "../middlewares/authMiddleware";
-import { requireRoles } from "../middlewares/roleMiddleware";
+import { Router } from 'express'
+import { shopController } from '../controllers/shopController'
+import { authenticate } from '../middlewares/authMiddleware'
+import { requireRoles } from '../middlewares/roleMiddleware'
+import { ROLES } from '../constants/roles'
 
-const router = Router();
+const router = Router()
 
 // Protect shop routes securely
-router.use(authenticate);
+router.use(authenticate)
+
+// Any authenticated role may READ settings (currency, exchange rate, order-management
+// flag are needed app-wide). Editing stays Admin-only.
+router.get(
+  '/settings',
+  requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]),
+  shopController.getSettings
+)
+router.put('/settings', requireRoles([ROLES.ADMIN]), shopController.updateSettings)
 
 // Only Admins can create shops
-router.post("/", requireRoles(["Admin"]), shopController.create);
-router.get("/", shopController.getAll);
+router.post('/', requireRoles([ROLES.ADMIN]), shopController.create)
+// Admin-only: returns just the caller's own shop (service scopes by shop_id).
+router.get('/', requireRoles([ROLES.ADMIN]), shopController.getAll)
 
-export default router;
+export default router

@@ -1,36 +1,36 @@
-import swaggerJsdoc from "swagger-jsdoc";
+import swaggerJsdoc from 'swagger-jsdoc'
 
 const options: swaggerJsdoc.Options = {
   definition: {
-    openapi: "3.0.0",
+    openapi: '3.0.0',
     info: {
-      title: "RoutinCafe_POS API",
-      version: "1.0.0",
-      description: "API documentation for RoutinCafe POS backend",
+      title: 'RoutinCafe_POS API',
+      version: '1.0.0',
+      description: 'API documentation for RoutinCafe POS backend',
     },
     servers: [
       {
-        url: "http://localhost:3000",
-        description: "Development server",
+        url: 'http://localhost:3000',
+        description: 'Development server',
       },
     ],
     components: {
       securitySchemes: {
-        bearerAuth: {
-          type: "http",
-          scheme: "bearer",
-          bearerFormat: "JWT",
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
         },
       },
     },
     security: [
       {
-        bearerAuth: [],
+        BearerAuth: [],
       },
     ],
   },
   // Look for annotations in these files
-  apis: ["./src/docs/*.ts", "./src/routes/*.ts", "./src/controllers/*.ts"],
-};
+  apis: ['./src/docs/*.ts', './src/routes/*.ts', './src/controllers/*.ts'],
+}
 
-export const swaggerSpec = swaggerJsdoc(options);
+export const swaggerSpec = swaggerJsdoc(options)

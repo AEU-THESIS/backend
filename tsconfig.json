@@ -3,6 +3,16 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
+    "types": [
+      "node",
+      "bcryptjs",
+      "cors",
+      "express",
+      "express-rate-limit",
+      "jsonwebtoken",
+      "swagger-jsdoc",
+      "swagger-ui-express"
+    ],
     "outDir": "./dist",
     "rootDir": ".",
     "strict": true,
@@ -15,5 +25,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*", "prisma/**/*", "*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts", "tests/**/*"]
 }

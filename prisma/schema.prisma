@@ -2,8 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -11,32 +10,85 @@ datasource db {
 }
 
 // ==========================================
+// ENUMS
+// ==========================================
+enum ProductType {
+  drink
+  food
+}
+
+enum PriceMode {
+  fixed
+  by_size
+}
+
+enum OptionSetType {
+  size
+  custom
+}
+
+// Money/fulfillment lifecycle states. Kept as DB enums so an invalid status can
+// never be written (the app is the only writer, but the DB is the last guard).
+enum OrderPaymentStatus {
+  paid
+  unpaid
+  refunded
+  partially_refunded
+  // Fully complimentary order (total = 0 because every charged line was redeemed
+  // free, e.g. a loyalty-stamp reward). Excluded from paid-only sales queries so it
+  // records no phantom revenue.
+  comp
+}
+
+enum OrderFulfillmentStatus {
+  // A customer pre-order awaiting staff acceptance; not yet in the kitchen flow.
+  pending
+  preparing
+  ready
+  completed
+  canceled
+  // A customer pre-order the staff declined (distinct from a voided/canceled sale).
+  rejected
+}
+
+enum TransactionStatus {
+  pending
+  completed
+  failed
+  refunded
+}
+
+// ==========================================
 // CORE: SHOP
 // ==========================================
 model Shop {
-  id               Int      @id @default(autoincrement())
-  name             String
-  slug             String
-  ownerName        String?  @map("owner_name")
-  phone            String?
-  address          String?  @db.Text
-  bakongAccountId  String?  @map("bakong_account_id")
-  currencySymbol   String   @default("$") @map("currency_symbol")
-  exchangeRate     Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
-  receiptFooter    String?  @map("receipt_footer") @db.Text
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id                       Int      @id @default(autoincrement())
+  name                     String
+  slug                     String   @unique
+  ownerName                String?  @map("owner_name")
+  phone                    String?
+  address                  String?  @db.Text
+  bakongAccountId          String?  @map("bakong_account_id")
+  currencySymbol           String   @default("$") @map("currency_symbol")
+  exchangeRate             Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
+  receiptFooter            String?  @map("receipt_footer") @db.Text
+  isOrderManagementEnabled Boolean  @default(true) @map("is_order_management_enabled")
+  isShopClosed             Boolean  @default(false) @map("is_shop_closed")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
-  users           User[]
-  roles           Role[]
-  categories      Category[]
-  products        Product[]
-  optionSets      OptionSet[]
-  promotions      Promotion[]
-  ingredients     Ingredient[]
-  notifications   Notification[]
-  shopTables      ShopTable[]
-  orders          Order[]
+  users                    User[]
+  roles                    Role[]
+  categories               Category[]
+  products                 Product[]
+  optionSets               OptionSet[]
+  variationGroupTemplates  VariationGroupTemplate[]
+  promotions               Promotion[]
+  ingredients              Ingredient[]
+  notifications            Notification[]
+  shopTables               ShopTable[]
+  orders                   Order[]
+  blockedTelegramCustomers BlockedTelegramCustomer[]
 
   @@map("shops")
 }
@@ -45,22 +97,36 @@ model Shop {
 // CORE: USER (Authentication)
 // ==========================================
 model User {
-  id           Int      @id @default(autoincrement())
-  shopId       Int      @map("shop_id")
-  name         String
-  email        String   @unique
-  password     String
-  pinCode      String?  @map("pin_code")
-  isPinEnabled Boolean  @default(false) @map("is_pin_enabled")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id            Int       @id @default(autoincrement())
+  shopId        Int       @map("shop_id")
+  name          String
+  email         String
+  password      String
+  pinCode       String?   @map("pin_code")
+  isPinEnabled  Boolean   @default(false) @map("is_pin_enabled")
+  phone         String?
+  address       String?   @db.Text
+  imageUrl      String?   @map("image_url") @db.LongText
+  isActive      Boolean   @default(true) @map("is_active")
+  employeeId    String?   @map("employee_id")
+  inviteToken   String?   @map("invite_token") @db.Text
+  inviteExpires DateTime? @map("invite_expires")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+  isDeleted     Boolean   @default(false) @map("is_deleted")
 
-  shop             Shop            @relation(fields: [shopId], references: [id])
-  roles            RoleUser[]
-  ingredientLogs   IngredientLog[]
-  orders           Order[]
-  personalTokens   PersonalAccessToken[]
+  shop                    Shop                     @relation(fields: [shopId], references: [id])
+  roles                   RoleUser[]
+  ingredientLogs          IngredientLog[]
+  variationGroupTemplates VariationGroupTemplate[]
+  orders                  Order[]                  @relation("OrderCreatedBy")
+  voidedOrders            Order[]                  @relation("OrderVoidedBy")
+  transactions            Transaction[]
+  personalTokens          PersonalAccessToken[]
 
+  @@unique([email, isDeleted], map: "users_email_is_deleted_key")
+  @@unique([employeeId, isDeleted], map: "users_employee_id_is_deleted_key")
   @@map("users")
 }
 
@@ -114,66 +180,82 @@ model PermissionRole {
 // SECURITY: TOKENS
 // ==========================================
 model PersonalAccessToken {
-  id             Int       @id @default(autoincrement())
-  tokenableType  String    @map("tokenable_type")
-  tokenableId    Int       @map("tokenable_id")
-  name           String
-  token          String    @unique
-  abilities      String?   @db.Text
-  lastUsedAt     DateTime? @map("last_used_at")
-  expiresAt      DateTime? @map("expires_at")
+  id            Int       @id @default(autoincrement())
+  tokenableType String    @map("tokenable_type")
+  tokenableId   Int       @map("tokenable_id")
+  name          String
+  token         String    @unique
+  abilities     String?   @db.Text
+  lastUsedAt    DateTime? @map("last_used_at")
+  expiresAt     DateTime? @map("expires_at")
 
-  user           User      @relation(fields: [tokenableId], references: [id])
+  user User @relation(fields: [tokenableId], references: [id])
 
   @@map("personal_access_tokens")
+}
+
+model BlacklistedToken {
+  id        Int      @id @default(autoincrement())
+  tokenHash String   @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("blacklisted_tokens")
 }
 
 // ==========================================
 // REUSABLE CATALOG OPTIONS (Templates)
 // ==========================================
 model Category {
-  id         Int      @id @default(autoincrement())
-  shopId     Int      @map("shop_id")
-  name       String
-  sortOrder  Int      @default(0) @map("sort_order")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  shop       Shop      @relation(fields: [shopId], references: [id])
-  products   Product[]
+  shop        Shop                @relation(fields: [shopId], references: [id])
+  products    Product[]
+  promotions  PromotionCategory[]
+  ingredients Ingredient[]
 
   @@map("categories")
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  shopId      Int      @map("shop_id")
-  categoryId  Int      @map("category_id")
+  id          Int         @id @default(autoincrement())
+  shopId      Int         @map("shop_id")
+  categoryId  Int         @map("category_id")
   name        String
-  price       Decimal  @db.Decimal(10, 2)
-  imageUrl    String?  @map("image_url")
-  isAvailable Boolean  @default(true) @map("is_available")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  price       Decimal?    @db.Decimal(10, 2)
+  imageUrl    String?     @map("image_url") @db.LongText
+  isAvailable Boolean     @default(true) @map("is_available")
+  type        ProductType @default(drink) @map("type")
+  priceMode   PriceMode   @default(fixed) @map("price_mode")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
-  shop        Shop               @relation(fields: [shopId], references: [id])
-  category    Category           @relation(fields: [categoryId], references: [id])
-  optionSets  ProductOptionSet[]
-  recipes     ProductRecipe[]
-  cartItems   CartItem[]
-  orderItems  OrderItem[]
+  shop       Shop               @relation(fields: [shopId], references: [id])
+  category   Category           @relation(fields: [categoryId], references: [id])
+  optionSets ProductOptionSet[]
+  recipes    ProductRecipe[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  promotions PromotionProduct[]
 
   @@map("products")
 }
 
 model OptionSet {
-  id        Int      @id @default(autoincrement())
-  shopId    Int      @map("shop_id")
+  id        Int           @id @default(autoincrement())
+  shopId    Int           @map("shop_id")
   name      String
-  createdAt DateTime @default(now()) @map("created_at")
+  type      OptionSetType @map("type")
+  createdAt DateTime      @default(now()) @map("created_at")
 
-  shop      Shop                  @relation(fields: [shopId], references: [id])
-  elements  OptionSetElement[]
-  products  ProductOptionSet[]
+  shop     Shop               @relation(fields: [shopId], references: [id])
+  elements OptionSetElement[]
+  products ProductOptionSet[]
 
   @@map("option_sets")
 }
@@ -185,7 +267,7 @@ model OptionSetElement {
   priceModifier Decimal @default(0.00) @map("price_modifier") @db.Decimal(10, 2)
   position      Int     @default(0)
 
-  optionSet OptionSet @relation(fields: [optionSetId], references: [id])
+  optionSet OptionSet @relation(fields: [optionSetId], references: [id], onDelete: Cascade)
 
   @@map("option_set_elements")
 }
@@ -196,10 +278,44 @@ model ProductOptionSet {
   optionSetId Int     @map("option_set_id")
   isRequired  Boolean @default(false) @map("is_required")
 
-  product   Product   @relation(fields: [productId], references: [id])
-  optionSet OptionSet @relation(fields: [optionSetId], references: [id])
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionSet OptionSet @relation(fields: [optionSetId], references: [id], onDelete: Cascade)
 
   @@map("product_option_sets")
+}
+
+model VariationGroupTemplate {
+  id          Int      @id @default(autoincrement())
+  shopId      Int      @map("shop_id")
+  name        String
+  description String?  @db.Text
+  category    String
+  createdBy   Int      @map("created_by")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop    Shop                           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  creator User                           @relation(fields: [createdBy], references: [id])
+  options VariationGroupTemplateOption[]
+
+  @@index([shopId, isActive])
+  @@map("variation_group_templates")
+}
+
+model VariationGroupTemplateOption {
+  id            Int      @id @default(autoincrement())
+  templateId    Int      @map("template_id")
+  optionLabel   String   @map("option_label")
+  priceModifier Decimal  @default(0.00) @map("price_modifier") @db.Decimal(10, 2)
+  displayOrder  Int      @default(0) @map("display_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  template VariationGroupTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, displayOrder])
+  @@map("variation_group_template_options")
 }
 
 // ==========================================
@@ -209,35 +325,86 @@ model Promotion {
   id            Int       @id @default(autoincrement())
   shopId        Int       @map("shop_id")
   name          String
-  discountType  String    @map("discount_type")
-  discountValue Decimal   @map("discount_value") @db.Decimal(10, 2)
+  code          String?
+  discountType  String    @map("discount_type") // PERCENTAGE | FIXED_AMOUNT | BOGO
+  discountValue Decimal   @default(0.00) @map("discount_value") @db.Decimal(10, 2)
+  scope         String    @default("ALL") // ALL | SPECIFIC
+  timesRedeemed Int       @default(0) @map("times_redeemed")
   isActive      Boolean   @default(false) @map("is_active")
   startDate     DateTime? @map("start_date")
   endDate       DateTime? @map("end_date")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  shop   Shop    @relation(fields: [shopId], references: [id])
-  orders Order[]
+  shop            Shop                @relation(fields: [shopId], references: [id])
+  orders          Order[]
+  orderPromotions OrderPromotion[]
+  categories      PromotionCategory[]
+  products        PromotionProduct[]
 
+  @@index([shopId])
   @@map("promotions")
+}
+
+// Pivot: promotions scoped to specific categories
+model PromotionCategory {
+  promotionId Int @map("promotion_id")
+  categoryId  Int @map("category_id")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, categoryId])
+  @@index([categoryId])
+  @@map("promotion_category")
+}
+
+// Pivot: promotions scoped to specific products
+model PromotionProduct {
+  promotionId Int @map("promotion_id")
+  productId   Int @map("product_id")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, productId])
+  @@index([productId])
+  @@map("promotion_product")
 }
 
 // ==========================================
 // CAFE INVENTORY (RECIPES & INGREDIENTS)
 // ==========================================
 model Ingredient {
-  id                Int      @id @default(autoincrement())
-  shopId            Int      @map("shop_id")
+  id                Int       @id @default(autoincrement())
+  shopId            Int       @map("shop_id")
+  categoryId        Int?      @map("category_id")
   name              String
-  unitOfMeasure     String   @map("unit_of_measure")
-  currentStock      Decimal  @default(0.00) @map("current_stock") @db.Decimal(10, 2)
-  lowStockThreshold Decimal  @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  unitOfMeasure     String    @map("unit_of_measure")
+  currentStock      Decimal   @default(0.00) @map("current_stock") @db.Decimal(10, 2)
+  lowStockThreshold Decimal   @default(0.00) @map("low_stock_threshold") @db.Decimal(10, 2)
+  // Weighted-average cost per unit. 4 dp (not 2) so small per-unit costs — e.g.
+  // coffee at $18/kg = $0.018/g — aren't rounded to zero.
+  unitCost          Decimal   @default(0.0000) @map("unit_cost") @db.Decimal(12, 4)
+  // Most recent purchase price per unit (the price from the last stock-in).
+  lastUnitCost      Decimal   @default(0.0000) @map("last_unit_cost") @db.Decimal(12, 4)
+  // Currency the cost figures are recorded in (the shop's configured currency).
+  // Currency the cost figures are recorded in. No default: it is always derived
+  // from the owning Shop's currencySymbol, so a blanket '$' here would silently
+  // mislabel local-currency costs.
+  costCurrency      String    @map("cost_currency")
+  imageUrl          String?   @map("image_url") @db.LongText
+  // Soft delete. IngredientLog rows are an immutable audit trail, so removing an
+  // item hides it from the catalogue rather than destroying its stock history.
+  deletedAt         DateTime? @map("deleted_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  shop    Shop            @relation(fields: [shopId], references: [id])
-  recipes ProductRecipe[]
-  logs    IngredientLog[]
+  shop     Shop            @relation(fields: [shopId], references: [id])
+  category Category?       @relation(fields: [categoryId], references: [id])
+  recipes  ProductRecipe[]
+  logs     IngredientLog[]
 
+  @@index([shopId, deletedAt])
+  @@index([categoryId])
   @@map("ingredients")
 }
 
@@ -259,6 +426,9 @@ model IngredientLog {
   userId          Int      @map("user_id")
   transactionType String   @map("transaction_type")
   quantityChanged Decimal  @map("quantity_changed") @db.Decimal(10, 2)
+  // Purchase price per unit at the moment of a stock-in (USD base). Null for
+  // removals. Captures cost history so past spend can be reconstructed later.
+  unitCost        Decimal? @map("unit_cost") @db.Decimal(12, 4)
   reason          String?
   createdAt       DateTime @default(now()) @map("created_at")
 
@@ -290,10 +460,10 @@ model Notification {
 // CUSTOMER SELF-SERVICE (QR & PRE-ORDER)
 // ==========================================
 model ShopTable {
-  id          Int      @id @default(autoincrement())
-  shopId      Int      @map("shop_id")
-  tableNumber String   @map("table_number")
-  qrToken     String   @unique @map("qr_token")
+  id          Int    @id @default(autoincrement())
+  shopId      Int    @map("shop_id")
+  tableNumber String @map("table_number")
+  qrToken     String @unique @map("qr_token")
   status      String
 
   shop     Shop           @relation(fields: [shopId], references: [id])
@@ -333,42 +503,86 @@ model CartItem {
 // ORDERS & TRANSACTIONS
 // ==========================================
 model Order {
-  id                   Int      @id @default(autoincrement())
-  shopId               Int      @map("shop_id")
-  userId               Int?     @map("user_id")
-  tableSessionId       Int?     @map("table_session_id")
-  promotionId          Int?     @map("promotion_id")
-  
-  orderNumber          String   @unique @map("order_number")
-  orderType            String   @map("order_type")
-  
-  customerName         String?  @map("customer_name")
-  customerPhone        String?  @map("customer_phone")
-  deliveryAddress      String?  @db.Text @map("delivery_address")
+  id             Int  @id @default(autoincrement())
+  shopId         Int  @map("shop_id")
+  userId         Int? @map("user_id")
+  tableSessionId Int? @map("table_session_id")
+  promotionId    Int? @map("promotion_id")
 
-  totalAmount          Decimal  @map("total_amount") @db.Decimal(10, 2)
-  discountAmount       Decimal  @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
-  receivedAmount       Decimal  @map("received_amount") @db.Decimal(10, 2)
-  paymentCurrency      String   @map("payment_currency")
-  exchangeRateSnapshot Decimal  @map("exchange_rate_snapshot") @db.Decimal(10, 2)
-  
-  paymentMethod        String   @map("payment_method")
-  khqrString           String?  @db.Text @map("khqr_string")
-  
-  paymentStatus        String   @map("payment_status")
-  fulfillmentStatus    String   @map("fulfillment_status")
-  
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  orderNumber String @unique @map("order_number")
+  orderType   String @map("order_type")
 
-  shop         Shop          @relation(fields: [shopId], references: [id])
-  user         User?         @relation(fields: [userId], references: [id])
-  tableSession TableSession? @relation(fields: [tableSessionId], references: [id])
-  promotion    Promotion?    @relation(fields: [promotionId], references: [id])
-  items        OrderItem[]
-  transactions Transaction[]
+  customerName     String?  @map("customer_name")
+  customerPhone    String?  @map("customer_phone")
+  deliveryAddress  String?  @map("delivery_address") @db.Text
+  // Customer-shared GPS coordinates for a delivery pre-order. Stored as-is (no
+  // reverse-geocoding); staff open a Google Maps link built from these.
+  deliveryLat      Decimal? @map("delivery_lat") @db.Decimal(10, 7)
+  deliveryLng      Decimal? @map("delivery_lng") @db.Decimal(10, 7)
+  // Telegram identity of the guest who placed a Mini App pre-order (verified via
+  // initData). Null for staff-created POS orders.
+  telegramUserId   String?  @map("telegram_user_id")
+  telegramUsername String?  @map("telegram_username")
+  telegramChatId   String?  @map("telegram_chat_id")
+  telegramMessageId Int?    @map("telegram_message_id")
 
+  totalAmount          Decimal @map("total_amount") @db.Decimal(10, 2)
+  discountAmount       Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+  receivedAmount       Decimal @map("received_amount") @db.Decimal(10, 2)
+  // Received amount normalised to USD (receivedAmount holds the native payment
+  // currency — riel for KHR payments, dollars for USD). Powers currency-agnostic
+  // reporting so a mixed-currency day can be summed in a single column.
+  receivedAmountUsd    Decimal @default(0.00) @map("received_amount_usd") @db.Decimal(10, 2)
+  // Change returned to the customer, in the payment currency (note-rounded for KHR).
+  changeAmount         Decimal @default(0.00) @map("change_amount") @db.Decimal(10, 2)
+  paymentCurrency      String  @map("payment_currency")
+  // Snapshot of the shop's exchange rate at checkout (server-authoritative).
+  exchangeRateSnapshot Decimal @map("exchange_rate_snapshot") @db.Decimal(10, 2)
+
+  paymentMethod String  @map("payment_method")
+  khqrString    String? @map("khqr_string") @db.Text
+
+  paymentStatus     OrderPaymentStatus     @map("payment_status")
+  fulfillmentStatus OrderFulfillmentStatus @map("fulfillment_status")
+
+  // Void audit: who reversed the whole order, when, and why. Set only when an
+  // order is voided (paymentStatus -> refunded, fulfillmentStatus -> canceled).
+  voidedAt       DateTime? @map("voided_at")
+  voidedByUserId Int?      @map("voided_by_user_id")
+  voidReason     String?   @map("void_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop              Shop             @relation(fields: [shopId], references: [id])
+  user              User?            @relation("OrderCreatedBy", fields: [userId], references: [id])
+  voidedBy          User?            @relation("OrderVoidedBy", fields: [voidedByUserId], references: [id])
+  tableSession      TableSession?    @relation(fields: [tableSessionId], references: [id])
+  promotion         Promotion?       @relation(fields: [promotionId], references: [id])
+  items             OrderItem[]
+  transactions      Transaction[]
+  appliedPromotions OrderPromotion[]
+
+  @@index([shopId, createdAt])
+  @@index([shopId, paymentStatus, createdAt])
+  @@index([shopId, fulfillmentStatus])
   @@map("orders")
+}
+
+// Pivot: every promotion applied to an order and how much it discounted. Promotions
+// stack (one per item), so an order can carry several; `discountAmount` on the order
+// is the sum, and `promotionId` records the single largest for quick reference.
+model OrderPromotion {
+  orderId        Int     @map("order_id")
+  promotionId    Int     @map("promotion_id")
+  discountAmount Decimal @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+
+  @@id([orderId, promotionId])
+  @@index([promotionId])
+  @@map("order_promotion")
 }
 
 model OrderItem {
@@ -379,6 +593,19 @@ model OrderItem {
   price      Decimal @db.Decimal(10, 2)
   extraPrice Decimal @default(0.00) @map("extra_price") @db.Decimal(10, 2)
   subtotal   Decimal @db.Decimal(10, 2)
+
+  // Complimentary line (e.g. a loyalty-stamp "buy 10 get 1 free" redemption). A comp
+  // line is persisted with subtotal = 0 so it adds no revenue to any report, while
+  // price/extraPrice are kept so the receipt can still show its normal (struck) price.
+  // compReason records why it was given free — a permanent audit trail on the order.
+  isComplimentary Boolean @default(false) @map("is_complimentary")
+  compReason      String? @map("comp_reason")
+
+  // Item cancellation (whole-line). canceledQuantity mirrors quantity when
+  // cancelled; the row is kept (struck through in the UI), never deleted, so the
+  // order still shows what was originally ordered.
+  canceledAt       DateTime? @map("canceled_at")
+  canceledQuantity Int       @default(0) @map("canceled_quantity")
 
   order   Order             @relation(fields: [orderId], references: [id])
   product Product           @relation(fields: [productId], references: [id])
@@ -400,18 +627,44 @@ model OrderItemOption {
 }
 
 model Transaction {
-  id            Int       @id @default(autoincrement())
-  orderId       Int       @map("order_id")
-  khqrString    String?   @db.Text @map("khqr_string")
-  md5Hash       String?   @map("md5_hash")
-  paymentMethod String    @map("payment_method")
-  amount        Decimal   @db.Decimal(10, 2)
+  id            Int               @id @default(autoincrement())
+  orderId       Int               @map("order_id")
+  userId        Int?              @map("user_id")
+  khqrString    String?           @map("khqr_string") @db.Text
+  md5Hash       String?           @map("md5_hash")
+  paymentMethod String            @map("payment_method")
+  // Signed amount in `currency`: positive for a payment, negative for a refund.
+  amount        Decimal           @db.Decimal(10, 2)
   currency      String
   payload       Json?
-  status        String
-  verifiedAt    DateTime? @map("verified_at")
+  status        TransactionStatus
+  verifiedAt    DateTime?         @map("verified_at")
 
   order Order @relation(fields: [orderId], references: [id])
+  user  User? @relation(fields: [userId], references: [id])
 
+  @@index([orderId])
   @@map("transactions")
+}
+
+// Temporary block-list for abusive Telegram guests. A staff member taps "Block"
+// on the group notification; further Mini App pre-orders from this telegramUserId
+// are rejected until `blockedUntil`. Temporary by design so a mistaken block
+// self-resolves — there is no permanent ban.
+model BlockedTelegramCustomer {
+  id               Int       @id @default(autoincrement())
+  shopId           Int       @map("shop_id")
+  telegramUserId   String    @map("telegram_user_id")
+  telegramUsername String?   @map("telegram_username")
+  // Null = blocked forever; a date = blocked until then. isBlocked treats a past
+  // date as expired (the block self-lifts).
+  blockedUntil     DateTime? @map("blocked_until")
+  reason           String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@unique([shopId, telegramUserId])
+  @@index([shopId, telegramUserId])
+  @@map("blocked_telegram_customers")
 }

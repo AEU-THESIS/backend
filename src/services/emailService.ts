@@ -1,14 +1,115 @@
-// This is a stub for the email service.
-// When you get SMTP credentials, you can replace this logic with Nodemailer or an API like Resend.
+import nodemailer from 'nodemailer'
+import { AppError, HttpStatus, Messages } from '../core/Service'
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'localhost',
+  port: Number(process.env.SMTP_PORT) || 1025,
+  auth: process.env.SMTP_USER
+    ? {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      }
+    : undefined,
+})
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
+const FROM = process.env.SMTP_FROM || 'RoutinCafe <no-reply@routincafe.com>'
+
+/**
+ * Escapes special characters for HTML to prevent XSS/Injection.
+ */
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  }
+  return text.replace(/[&<>"']/g, m => map[m])
+}
+
 export const emailService = {
-  async sendPasswordResetEmail(email: string, token: string) {
-    console.log("\n==================================================");
-    console.log(`📧 MOCK EMAIL SENT TO: ${email}`);
-    console.log(`⏰ Expiry: 24 Hours`);
-    console.log(
-      `🔗 Reset Link: http://localhost:3000/reset-password?token=${token}`,
-    );
-    console.log("==================================================\n");
-    return true;
+  /**
+   * Sends an account setup email to a newly created staff member.
+   * The link contains a JWT token valid for 8 hours.
+   */
+  async sendAccountSetupEmail(email: string, name: string, token: string) {
+    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`
+    const escapedName = escapeHtml(name)
+
+    try {
+      await transporter.sendMail({
+        from: FROM,
+        to: email,
+        subject: 'Welcome to RoutinCafe — Set Your Password',
+        html: `
+          <div style="font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+            <h2 style="color: #33251d; margin-bottom: 8px;">Welcome, ${escapedName}!</h2>
+            <p style="color: #555; line-height: 1.6;">
+              You have been added as a team member at <strong>RoutinCafe</strong>.
+              Please click the button below to set your password and activate your account.
+            </p>
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${resetLink}"
+                 style="background-color: #33251d; color: #fff; padding: 14px 32px; border-radius: 8px;
+                        text-decoration: none; font-weight: bold; display: inline-block;">
+                Set Your Password
+              </a>
+            </div>
+            <p style="color: #999; font-size: 13px;">
+              This link expires in <strong>8 hours</strong>. If you did not expect this email, please ignore it.
+            </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+            <p style="color: #bbb; font-size: 11px; text-align: center;">
+              © ${new Date().getFullYear()} RoutinCafe • Artisan POS System
+            </p>
+          </div>
+        `,
+      })
+    } catch (error) {
+      throw new AppError(Messages.EMAIL_SEND_FAILED, HttpStatus.INTERNAL_SERVER_ERROR)
+    }
   },
-};
+
+  /**
+   * Sends a password reset email for the "Forgot Password" flow.
+   * The link contains a JWT token valid for 8 hours.
+   */
+  async sendPasswordResetEmail(email: string, token: string) {
+    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`
+
+    try {
+      await transporter.sendMail({
+        from: FROM,
+        to: email,
+        subject: 'RoutinCafe — Reset Your Password',
+        html: `
+          <div style="font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+            <h2 style="color: #33251d; margin-bottom: 8px;">Password Reset Request</h2>
+            <p style="color: #555; line-height: 1.6;">
+              We received a request to reset your password.
+              Click the button below to choose a new password.
+            </p>
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${resetLink}"
+                 style="background-color: #845230; color: #fff; padding: 14px 32px; border-radius: 8px;
+                        text-decoration: none; font-weight: bold; display: inline-block;">
+                Reset Password
+              </a>
+            </div>
+            <p style="color: #999; font-size: 13px;">
+              This link expires in <strong>8 hours</strong>. If you did not request this, you can safely ignore this email.
+            </p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+            <p style="color: #bbb; font-size: 11px; text-align: center;">
+              © ${new Date().getFullYear()} RoutinCafe • Artisan POS System
+            </p>
+          </div>
+        `,
+      })
+    } catch (error) {
+      throw new AppError(Messages.EMAIL_SEND_FAILED, HttpStatus.INTERNAL_SERVER_ERROR)
+    }
+  },
+}

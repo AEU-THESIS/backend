@@ -1,8 +1,15 @@
-import { Router } from "express";
-import { authController } from "../controllers/authController";
+import { Router } from 'express'
+import { authController } from '../controllers/authController'
+import { authenticate } from '../middlewares/authMiddleware'
+import { loginLimiter, passwordResetLimiter } from '../middlewares/rateLimiterMiddleware'
 
-const router = Router();
+const router = Router()
 
-router.post("/login", authController.login);
+router.post('/sessions', loginLimiter, authController.login)
+router.delete('/sessions', authenticate, authController.logout)
 
-export default router;
+// Public routes — no authentication required
+router.post('/password-resets', passwordResetLimiter, authController.forgotPassword)
+router.put('/password-resets/:token', passwordResetLimiter, authController.resetPassword)
+
+export default router
