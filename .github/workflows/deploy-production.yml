@@ -120,11 +120,19 @@ jobs:
             IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}" SERVICE=backend ./deploy.sh
 
       - name: Send Telegram Notification
-        if: always() && secrets.TELEGRAM_BOT_TOKEN != ''
+        if: always()
         env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
           JOB_STATUS: ${{ job.status }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram credentials not configured. Skipping notification."
+            exit 0
+          fi
+
           if [ "$JOB_STATUS" = "success" ]; then
             STATUS="✅ Succeeded"
           else
@@ -134,9 +142,9 @@ jobs:
           TEXT="<b>🟢 Backend Production Deploy (${STATUS})</b>%0A<b>Release Tag:</b> <code>${IMAGE_TAG}</code>%0A<b>Triggered by:</b> ${{ github.actor }}%0A<b>URL:</b> https://routinecafe.site"
 
           TOPIC_PARAM=""
-          if [ -n "${{ secrets.TELEGRAM_TOPIC_ID }}" ]; then
-            TOPIC_PARAM="&message_thread_id=${{ secrets.TELEGRAM_TOPIC_ID }}"
+          if [ -n "$TELEGRAM_TOPIC_ID" ]; then
+            TOPIC_PARAM="&message_thread_id=${TELEGRAM_TOPIC_ID}"
           fi
 
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}${TOPIC_PARAM}&parse_mode=HTML&text=${TEXT}" >/dev/null || true
