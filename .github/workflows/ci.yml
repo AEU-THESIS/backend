@@ -2,7 +2,7 @@ name: Backend CI
 
 on:
   push:
-    branches: ['dev', 'feature/**', 'feat/**', 'fix/**', 'chore/**']
+    branches: ['dev', 'prod', 'main', 'feature/**', 'feat/**', 'fix/**', 'chore/**']
   pull_request:
     branches: ['dev', 'prod', 'main']
   workflow_dispatch:

@@ -2,12 +2,14 @@ name: Deploy Backend (Production)
 
 on:
   push:
-    branches: ['main']
-    tags: ['v*']
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+      - '!v*-staging*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing Docker image tag to deploy (e.g. v1.0.0 or staging-abc1234)'
+        description: 'Existing Docker image tag to deploy (e.g. v1.0.0)'
         required: false
 
 env:
@@ -103,7 +105,7 @@ jobs:
             set -euo pipefail
             APP_DIR="${{ secrets.APP_DIR }}"
             if [ -z "$APP_DIR" ]; then
-              APP_DIR="$HOME/projects/rountin-cafe/prod"
+              APP_DIR="$HOME/projects/rountine-cafe/production"
             fi
 
             echo "==> Deploying backend to Production: $APP_DIR"
