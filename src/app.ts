@@ -8,6 +8,7 @@ import swaggerUi from 'swagger-ui-express'
 import { swaggerSpec } from './config/swagger.config'
 import { errorHandler } from './middlewares/errorHandler'
 import { redactSensitiveFields } from './utils/sanitizer'
+import { UPLOAD_DIR } from './utils/fileUpload'
 
 const app = express()
 
@@ -97,7 +98,7 @@ app.use('/api', limiter)
  */
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
-app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')))
+app.use('/uploads', express.static(UPLOAD_DIR))
 
 /**
  * -----------------------------

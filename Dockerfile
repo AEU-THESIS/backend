@@ -25,8 +25,8 @@ RUN npm run build
 # Expose port 3000 for network access
 EXPOSE 3000
 
-# Set ownership to the built-in non-root 'node' user
-RUN chown -R node:node /usr/src/app
+# Ensure uploads directory exists and set ownership to the built-in non-root 'node' user
+RUN mkdir -p /usr/src/app/public/uploads && chown -R node:node /usr/src/app
 
 # Drop privileges
 USER node
