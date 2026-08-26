@@ -14,6 +14,7 @@ import { CreatePreOrderSchema, ShopSlugParamsSchema } from '../validations/publi
 import prisma from '../config/database'
 import { buildPreOrderMessage, telegram } from '../utils/telegram'
 import { telegramCustomerService } from '../services/telegramCustomerService'
+import { notificationService } from '../services/notificationService'
 
 /**
  * Public (Telegram Mini App) ordering endpoints. All routes are gated by
@@ -58,6 +59,24 @@ export const publicOrderController = {
       try {
         const fullOrder = await orderService.getOrderById(shop.id, result.id)
         orderSseController.safeBroadcastToShop(shop.id, 'order_created', fullOrder)
+
+        const itemSummary =
+          fullOrder.items?.map(i => `${i.quantity}x ${i.product?.name ?? 'Item'}`).join(', ') ||
+          'Customer pre-order'
+
+        void notificationService
+          .createNotification(shop.id, 'new_pre_order', 'order', result.id, {
+            title: `New Pre-Order #${fullOrder.orderNumber}`,
+            description: itemSummary,
+            orderNumber: fullOrder.orderNumber,
+            totalAmount: Number(fullOrder.totalAmount),
+            customerName: fullOrder.customerName || fullOrder.telegramUsername || 'Customer',
+            navigateTo: '/orders',
+          })
+          .catch(err => {
+            console.error('⚠️ [notification] failed to create pre-order notification:', err)
+          })
+
         if (telegram.isConfigured()) {
           const { text, replyMarkup } = buildPreOrderMessage(fullOrder, shop.currencySymbol)
           const sent = await telegram.sendGroupMessage(text, replyMarkup)

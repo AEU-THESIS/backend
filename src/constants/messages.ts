@@ -85,4 +85,11 @@ export const Messages = {
   CUSTOMER_BLOCKED_ADDED: 'Customer blocked',
   CUSTOMER_BLOCK_REMOVED: 'Customer unblocked',
   SHOP_CLOSED: 'The shop is currently closed. Please check back later.',
+  // Notifications
+  NOTIFICATION_NOT_FOUND: 'Notification not found',
+  NOTIFICATIONS_RETRIEVED: 'Notifications retrieved successfully',
+  NOTIFICATION_MARKED_READ: 'Notification marked as read',
+  ALL_NOTIFICATIONS_MARKED_READ: 'All notifications marked as read',
+  NOTIFICATION_DELETED: 'Notification deleted successfully',
+  ALL_NOTIFICATIONS_CLEARED: 'All notifications cleared successfully',
 } as const
