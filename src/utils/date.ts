@@ -256,6 +256,19 @@ export function shopDateString(dayOffset = 0): string {
 }
 
 /**
+ * The shop-local calendar date (`YYYY-MM-DD`) a UTC instant falls on. Use this to
+ * bucket stored timestamps into local days (an order placed just after local
+ * midnight belongs to the new day, not the server's).
+ */
+export function toShopDateString(date: Date): string {
+  const shopTime = new Date(date.getTime() + SHOP_UTC_OFFSET_MINUTES * 60_000)
+  const year = shopTime.getUTCFullYear()
+  const month = String(shopTime.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(shopTime.getUTCDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
  * Calculates the start date based on the specified period.
  */
 export function getPeriodStartDate(period: 'daily' | 'weekly' | 'monthly'): Date {

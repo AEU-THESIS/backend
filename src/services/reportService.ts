@@ -7,7 +7,12 @@ import {
   getKpiRange,
   KpiRange,
   buildRangeBuckets,
+  shopDayStartUtc,
+  shopDayEndUtc,
+  shopDateString,
 } from '../utils/date'
+import { buildSalesSummaryReport } from './salesSummaryExport'
+import { renderSalesSummaryWorkbook, salesSummaryFileName } from '../utils/salesSummaryWorkbook'
 
 // Cancelled/voided money must never show up in a report. Only orders that actually
 // took money count: `paid`, plus `partially_refunded` (whose `totalAmount` already
@@ -19,22 +24,21 @@ const soldOrderWhere: Prisma.OrderWhereInput = {
 }
 
 export const reportService = {
-  async getDailySummary(shopId: number, date?: string) {
-    let targetDate = new Date()
+  /**
+   * Cash/KHQR breakdown for one day, or for the inclusive window
+   * [date, endDate] when `endDate` is supplied. Omitting `endDate` keeps the
+   * original single-day behaviour.
+   */
+  async getDailySummary(shopId: number, date?: string, endDate?: string) {
+    const firstDay = date ?? shopDateString(0)
+    const lastDay = endDate ?? firstDay
 
-    if (date) {
-      const parsed = new Date(`${date}T00:00:00`)
-      if (isNaN(parsed.getTime())) {
-        throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
-      }
-      targetDate = parsed
+    if (lastDay < firstDay) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
 
-    const startOfDay = new Date(targetDate)
-    startOfDay.setHours(0, 0, 0, 0)
-
-    const endOfDay = new Date(targetDate)
-    endOfDay.setHours(23, 59, 59, 999)
+    const startOfDay = shopDayStartUtc(firstDay)
+    const endOfDay = shopDayEndUtc(lastDay)
 
     const [groups, shop] = await Promise.all([
       prisma.order.groupBy({
@@ -476,6 +480,55 @@ export const reportService = {
       outOfStock,
       lowStock,
     }
+  },
+
+  /**
+   * Builds the "Menu Performance" Sales Summary workbook for an inclusive window
+   * of shop-local days. Returns `null` when the window sold nothing, so the
+   * controller can answer 204 instead of handing back an empty sheet.
+   */
+  async getSalesSummaryExport(shopId: number, startDate: string, endDate: string) {
+    const [orders, shop] = await Promise.all([
+      prisma.order.findMany({
+        where: {
+          shopId,
+          ...soldOrderWhere,
+          createdAt: { gte: shopDayStartUtc(startDate), lte: shopDayEndUtc(endDate) },
+        },
+        select: {
+          createdAt: true,
+          paymentMethod: true,
+          discountAmount: true,
+          items: {
+            select: {
+              productId: true,
+              quantity: true,
+              price: true,
+              extraPrice: true,
+              subtotal: true,
+              canceledQuantity: true,
+              product: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.shop.findUnique({ where: { id: shopId }, select: { name: true } }),
+    ])
+
+    if (!shop) {
+      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    const report = buildSalesSummaryReport(orders, { startDate, endDate })
+    if (report.days.length === 0) return null
+
+    const buffer = await renderSalesSummaryWorkbook(report, {
+      shopName: shop.name,
+      generatedAt: new Date(),
+    })
+
+    return { buffer, fileName: salesSummaryFileName(startDate, endDate) }
   },
 
   async getCSVExportData(

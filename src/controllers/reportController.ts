@@ -1,4 +1,5 @@
 import { Request, Response, catchAsync, sendSuccess } from '../core/Controller'
+import { HttpStatus } from '../constants/httpStatus'
 import { reportService } from '../services/reportService'
 import {
   ReportPeriodSchema,
@@ -6,6 +7,7 @@ import {
   KpiSummarySchema,
   SalesTrendSchema,
   DailySummaryQuerySchema,
+  SalesSummaryExportSchema,
 } from '../validations/reportValidation'
 
 export const reportController = {
@@ -82,11 +84,37 @@ export const reportController = {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     return res.status(200).send(csvContent)
   }),
+  /**
+   * Streams the Sales Summary ("Menu Performance") workbook for a date range.
+   * Answers 204 when the window has no sales, so the client can say so instead
+   * of downloading an empty sheet.
+   */
+  exportSalesSummary: catchAsync(async (req: Request, res: Response) => {
+    const shopId = req.user!.shop_id
+    const { startDate, endDate } = SalesSummaryExportSchema.parse(req.query)
+
+    const workbook = await reportService.getSalesSummaryExport(shopId, startDate, endDate)
+
+    if (!workbook) {
+      return res.status(HttpStatus.NO_CONTENT).end()
+    }
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    res.setHeader('Content-Disposition', `attachment; filename="${workbook.fileName}"`)
+    // The filename is the payload's identity, so let the browser read it back.
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition')
+    res.setHeader('Content-Length', workbook.buffer.length)
+    return res.status(HttpStatus.OK).send(workbook.buffer)
+  }),
+
   getReportToday: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const { date } = DailySummaryQuerySchema.parse(req.query)
+    const { date, endDate } = DailySummaryQuerySchema.parse(req.query)
 
-    const summary = await reportService.getDailySummary(shopId, date)
+    const summary = await reportService.getDailySummary(shopId, date, endDate)
     return sendSuccess(res, summary)
   }),
 }
