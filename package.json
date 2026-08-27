@@ -8,7 +8,6 @@
     "build": "tsc",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate",
     "prepare": "husky"
   },
   "repository": {
