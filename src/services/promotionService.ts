@@ -2,6 +2,7 @@ import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type { Prisma } from '@prisma/client'
 import type { CreatePromotionInput, UpdatePromotionInput } from '../validations/promotionValidation'
 import { shopDateString, shopDayStartUtc, shopDayEndUtc } from '../utils/date'
+import { notificationService } from './notificationService'
 
 // Fields returned to the client. Scope relations are flattened to id arrays.
 const promotionSelect = {
@@ -377,7 +378,46 @@ export const promotionService = {
       })
     })
 
-    return toDto(promotion)
+    const dto = toDto(promotion)
+
+    // Fire-and-forget notification when promotion active state changed
+    if (input.isActive !== undefined && input.isActive !== existing.isActive) {
+      if (input.isActive) {
+        const desc =
+          dto.discountType === 'PERCENTAGE'
+            ? `${dto.discountValue}% off`
+            : dto.discountType === 'FIXED_AMOUNT'
+              ? `Fixed discount: ${dto.discountValue}`
+              : 'Buy 1 Get 1 Free'
+        void notificationService
+          .createNotification(shopId, 'promotion_activated', 'promotion', id, {
+            title: `Promotion Activated: ${dto.name}`,
+            description: `${desc} is now active`,
+            promotionId: id,
+            promotionName: dto.name,
+            targetRole: 'Admin',
+            navigateTo: '/promotions',
+          })
+          .catch(err => {
+            console.error('⚠️ [notification] promotion-activated notification failed:', err)
+          })
+      } else {
+        void notificationService
+          .createNotification(shopId, 'promotion_deactivated', 'promotion', id, {
+            title: `Promotion Deactivated: ${dto.name}`,
+            description: `Promotion "${dto.name}" has been paused/deactivated`,
+            promotionId: id,
+            promotionName: dto.name,
+            targetRole: 'Admin',
+            navigateTo: '/promotions',
+          })
+          .catch(err => {
+            console.error('⚠️ [notification] promotion-deactivated notification failed:', err)
+          })
+      }
+    }
+
+    return dto
   },
 
   /**

@@ -4,6 +4,7 @@ import type { CreatePreOrderInput } from '../validations/publicOrderValidation'
 import { telegramCustomerService } from './telegramCustomerService'
 import { Prisma } from '@prisma/client'
 import { promotionService } from './promotionService'
+import { notificationService } from './notificationService'
 import {
   cartDiscounts,
   recalcSurvivorMoney,
@@ -1256,6 +1257,25 @@ export const orderService = {
         return createdOrder
       })
     )
+
+    // Notify staff screens of incoming pre-order
+    const itemSummary =
+      validatedItemsList
+        .map(v => `${v.quantity}x ${productMap.get(v.productId)?.name ?? 'Item'}`)
+        .join(', ') || 'Customer pre-order'
+
+    void notificationService
+      .createNotification(shopId, 'new_pre_order', 'order', order.id, {
+        title: `New Pre-Order #${order.orderNumber}`,
+        description: itemSummary,
+        orderNumber: order.orderNumber,
+        totalAmount: netTotal,
+        customerName: customerName || telegram.username || 'Customer',
+        navigateTo: '/orders',
+      })
+      .catch(err => {
+        console.error('⚠️ [notification] failed to create pre-order notification:', err)
+      })
 
     return {
       id: order.id,

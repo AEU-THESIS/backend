@@ -14,7 +14,8 @@ const publicClients = new Map<number, PublicClient[]>()
 
 export const orderSseController = {
   subscribe(req: Request, res: Response) {
-    const shopId = req.user?.shop_id
+    const rawShopId = req.user?.shop_id
+    const shopId = rawShopId ? Number(rawShopId) : 0
 
     if (!shopId) {
       res
@@ -139,44 +140,55 @@ export const orderSseController = {
     })
   },
 
-  broadcastToShop(shopId: number, event: 'order_created' | 'order_updated', orderData: any) {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(orderData)}\n\n`
+  broadcastToShop(
+    shopId: number,
+    event: 'order_created' | 'order_updated' | 'notification_created',
+    data: any
+  ) {
+    const numericShopId = Number(shopId)
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
     // Dispatch to staff clients
-    const clients = activeClients.get(shopId)
+    const clients = activeClients.get(numericShopId)
     if (clients && clients.length > 0) {
       clients.forEach(client => {
         try {
           client.write(payload)
         } catch (error) {
-          console.error(`❌ Failed to send SSE payload to staff in Shop #${shopId}`, error)
+          console.error(`❌ Failed to send SSE payload to staff in Shop #${numericShopId}`, error)
         }
       })
     }
 
-    // Dispatch to public customer clients
-    const pubList = publicClients.get(shopId)
-    if (pubList && pubList.length > 0) {
-      pubList.forEach(client => {
-        // If client specified telegramUserId, only send if matching or broadcast
-        if (
-          !client.telegramUserId ||
-          !orderData.telegramUserId ||
-          String(orderData.telegramUserId) === client.telegramUserId
-        ) {
-          try {
-            client.res.write(payload)
-          } catch {
-            // client disconnected
+    // Dispatch to public customer clients only for customer-facing order events
+    if (event !== 'notification_created') {
+      const pubList = publicClients.get(numericShopId)
+      if (pubList && pubList.length > 0) {
+        pubList.forEach(client => {
+          // If client specified telegramUserId, only send if matching or broadcast
+          if (
+            !client.telegramUserId ||
+            !data.telegramUserId ||
+            String(data.telegramUserId) === client.telegramUserId
+          ) {
+            try {
+              client.res.write(payload)
+            } catch {
+              // client disconnected
+            }
           }
-        }
-      })
+        })
+      }
     }
   },
 
-  safeBroadcastToShop(shopId: number, event: 'order_created' | 'order_updated', orderData: any) {
+  safeBroadcastToShop(
+    shopId: number,
+    event: 'order_created' | 'order_updated' | 'notification_created',
+    data: any
+  ) {
     try {
-      this.broadcastToShop(shopId, event, orderData)
+      this.broadcastToShop(shopId, event, data)
     } catch (error) {
       console.error(`⚠️ [SSE] safeBroadcastToShop failed for Shop #${shopId}:`, error)
     }

@@ -13,6 +13,7 @@ import promotionRoutes from './promotionRoutes'
 import variationTemplateRoutes from './variationTemplateRoutes'
 import publicRoutes from './publicRoutes'
 import blockedCustomerRoutes from './blockedCustomerRoutes'
+import notificationRoutes from './notificationRoutes'
 
 const router = Router()
 
@@ -29,6 +30,8 @@ router.use('/orders', orderRoutes)
 router.use('/reports', reportRoutes)
 router.use('/promotions', promotionRoutes)
 router.use('/variation-templates', variationTemplateRoutes)
+// In-app notifications
+router.use('/notifications', notificationRoutes)
 // Public customer-facing routes (Telegram Mini App pre-orders + Telegram webhook).
 router.use('/public', publicRoutes)
 // Admin/Manager block-list management (anti-spam for pre-orders).

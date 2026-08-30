@@ -14,6 +14,7 @@ import {
   toDecimal,
   type DecimalLike,
 } from './inventoryCost'
+import { notificationService } from './notificationService'
 
 const DEFAULT_COST_CURRENCY = '$'
 
@@ -117,6 +118,76 @@ const getExistingInventoryItem = async (id: number, shopId: number) => {
   return item
 }
 
+const checkAndNotifyStockStatus = async (
+  shopId: number,
+  item: {
+    id: number
+    name: string
+    unitOfMeasure: string
+    quantity: number
+    minAlertThreshold: number
+    status: string
+  }
+) => {
+  try {
+    if (item.status === 'out_of_stock') {
+      // Resolve any previous low_stock alerts for this item since it has escalated to out of stock
+      await prisma.notification.updateMany({
+        where: {
+          shopId,
+          notifiableType: { in: ['ingredient', 'Ingredient'] },
+          notifiableId: item.id,
+          type: 'low_stock',
+          readAt: null,
+        },
+        data: { readAt: new Date() },
+      })
+
+      await notificationService.createNotification(shopId, 'out_of_stock', 'ingredient', item.id, {
+        title: `Out of Stock: ${item.name}`,
+        description: `Current stock has reached 0 ${item.unitOfMeasure}`,
+        ingredientId: item.id,
+        ingredientName: item.name,
+        navigateTo: '/inventory',
+      })
+    } else if (item.status === 'low_stock') {
+      // Resolve any previous out_of_stock alerts for this item if it was partially restocked to low stock
+      await prisma.notification.updateMany({
+        where: {
+          shopId,
+          notifiableType: { in: ['ingredient', 'Ingredient'] },
+          notifiableId: item.id,
+          type: 'out_of_stock',
+          readAt: null,
+        },
+        data: { readAt: new Date() },
+      })
+
+      await notificationService.createNotification(shopId, 'low_stock', 'ingredient', item.id, {
+        title: `Low Stock: ${item.name}`,
+        description: `Only ${item.quantity} ${item.unitOfMeasure} remaining (threshold: ${item.minAlertThreshold})`,
+        ingredientId: item.id,
+        ingredientName: item.name,
+        targetRole: 'Admin',
+        navigateTo: '/inventory',
+      })
+    } else if (item.status === 'in_stock') {
+      // Item is healthy again: auto-resolve any unread stock warnings for this item
+      await prisma.notification.updateMany({
+        where: {
+          shopId,
+          notifiableType: { in: ['ingredient', 'Ingredient'] },
+          notifiableId: item.id,
+          readAt: null,
+        },
+        data: { readAt: new Date() },
+      })
+    }
+  } catch (err) {
+    console.error('⚠️ [notification] checkAndNotifyStockStatus failed:', err)
+  }
+}
+
 export const inventoryService = {
   async getAll(shopId: number, query: InventoryQueryInput = {}) {
     const search = query.search?.trim()
@@ -188,7 +259,9 @@ export const inventoryService = {
       return created
     })
 
-    return mapInventoryItem(item)
+    const mapped = mapInventoryItem(item)
+    await checkAndNotifyStockStatus(shopId, mapped)
+    return mapped
   },
 
   async update(id: number, shopId: number, data: UpdateInventoryItemInput, imageUrl?: string) {
@@ -229,7 +302,9 @@ export const inventoryService = {
       include: { category: CATEGORY_SELECT },
     })
 
-    return mapInventoryItem(item)
+    const mapped = mapInventoryItem(item)
+    await checkAndNotifyStockStatus(shopId, mapped)
+    return mapped
   },
 
   async delete(id: number, shopId: number) {
@@ -246,7 +321,7 @@ export const inventoryService = {
   },
 
   async adjust(id: number, shopId: number, userId: number, data: AdjustInventoryItemInput) {
-    return prisma.$transaction(async tx => {
+    const result = await prisma.$transaction(async tx => {
       // The weighted average is computed in application code from the row's
       // current stock and cost, so a plain read would let two concurrent
       // stock-ins both work from the pre-update snapshot: the increments would
@@ -322,6 +397,9 @@ export const inventoryService = {
 
       return mapInventoryItem(updatedItem)
     })
+
+    await checkAndNotifyStockStatus(shopId, result)
+    return result
   },
 
   // Shop-wide valuation of the whole inventory, independent of any list filters,

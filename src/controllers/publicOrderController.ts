@@ -58,6 +58,7 @@ export const publicOrderController = {
       try {
         const fullOrder = await orderService.getOrderById(shop.id, result.id)
         orderSseController.safeBroadcastToShop(shop.id, 'order_created', fullOrder)
+
         if (telegram.isConfigured()) {
           const { text, replyMarkup } = buildPreOrderMessage(fullOrder, shop.currencySymbol)
           const sent = await telegram.sendGroupMessage(text, replyMarkup)
