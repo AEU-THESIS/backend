@@ -93,6 +93,9 @@ export const GetOrdersQuerySchema = z.object({
   search: z.string().optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  // Restrict the list to one cashier's orders ("my sales"). A Cashier is clamped to
+  // their own id server-side, so this can never expose a colleague's takings.
+  userId: z.coerce.number().int().positive().optional(),
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().optional(),
 })

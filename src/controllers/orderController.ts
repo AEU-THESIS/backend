@@ -53,7 +53,10 @@ export const orderController = {
       throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
     }
 
-    const result = await orderService.getAllOrders(shopId, parsed.data)
+    const result = await orderService.getAllOrders(shopId, parsed.data, {
+      userId: req.user!.user_id,
+      role: req.user!.role,
+    })
 
     return sendSuccess(res, result, Messages.ORDERS_RETRIEVED, HttpStatus.OK)
   }),

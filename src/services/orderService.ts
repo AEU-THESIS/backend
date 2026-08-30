@@ -12,6 +12,15 @@ import {
 } from '../utils/promotionDiscount'
 import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
 import { round2, roundRielUp, roundRielDown } from '../utils/money'
+import { ROLES } from '../constants/roles'
+
+/**
+ * The cashier (acting staff member) attached to every order response. Kept as one
+ * constant so the list, the detail and the live-stream update all expose exactly the
+ * same shape — a client can rely on `order.user` being present (or null for an order
+ * with no recorded staff member, which the UI renders as "System").
+ */
+const cashierSelect = { id: true, name: true, employeeId: true } as const
 
 /**
  * Builds the next per-shop, per-day order number, e.g. `ORD-1-20260805-0001`.
@@ -643,9 +652,16 @@ export const orderService = {
       search?: string
       startDate?: string
       endDate?: string
+      // Restrict to the orders taken by one cashier. Cashiers are clamped to their
+      // own id by the caller (see the actor argument) so the filter can never be
+      // used to read a colleague's sales.
+      userId?: number
       page?: number
       limit?: number
-    }
+    },
+    // Who is asking. A Cashier may only ever filter by their own id; Admins and
+    // Managers may filter by any staff member (or none, for the whole shop).
+    actor?: { userId: number; role: string | null }
   ) {
     const {
       status,
@@ -656,6 +672,7 @@ export const orderService = {
       search,
       startDate,
       endDate,
+      userId,
       page = 1,
       limit = 50,
     } = filters
@@ -692,6 +709,16 @@ export const orderService = {
     // Order-origin filter (e.g. pre_order for the Pre-Orders board).
     if (orderType) {
       whereClause.orderType = orderType
+    }
+
+    // Cashier filter. A Cashier asking for a specific cashier's orders is forced back
+    // onto their own id, so "show me my sales" works while another cashier's takings
+    // stay out of reach. Admins/Managers may filter by anyone. Omitting the filter
+    // still returns the whole shop for every role (the kitchen board needs that).
+    const cashierFilterId =
+      actor?.role === ROLES.CASHIER ? (userId === undefined ? undefined : actor.userId) : userId
+    if (cashierFilterId !== undefined) {
+      whereClause.userId = cashierFilterId
     }
 
     // "Free items only" reconciliation filter — restrict to orders carrying at least
@@ -763,6 +790,8 @@ export const orderService = {
         skip,
         take: limit,
         include: {
+          // The cashier who took the order — every list row shows their name.
+          user: { select: cashierSelect },
           items: {
             include: {
               product: true,
@@ -771,7 +800,6 @@ export const orderService = {
           },
           // Staff member who rang the order up. Null for guest pre-orders placed
           // through the Telegram Mini App, which carry no `userId`.
-          user: { select: { id: true, name: true } },
           promotion: {
             select: { id: true, name: true, discountType: true, discountValue: true },
           },
@@ -804,6 +832,8 @@ export const orderService = {
         shopId,
       },
       include: {
+        // The cashier who took the order (shown in the detail panel's info block).
+        user: { select: cashierSelect },
         items: {
           include: {
             product: true,
@@ -812,7 +842,6 @@ export const orderService = {
         },
         // Staff member who rang the order up. Null for guest pre-orders placed
         // through the Telegram Mini App, which carry no `userId`.
-        user: { select: { id: true, name: true } },
         promotion: {
           select: { id: true, name: true, discountType: true, discountValue: true },
         },
@@ -910,6 +939,9 @@ export const orderService = {
           ...settleOnComplete,
         },
         include: {
+          // Keep the live-stream payload shape in step with the list/detail responses
+          // so a board row refreshed over SSE keeps showing its cashier.
+          user: { select: cashierSelect },
           items: {
             include: {
               product: true,
