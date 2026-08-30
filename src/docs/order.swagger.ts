@@ -240,6 +240,17 @@
  *                           paymentStatus:
  *                             type: string
  *                             example: paid
+ *                           user:
+ *                             type: object
+ *                             nullable: true
+ *                             description: Staff member who created the order. Null for guest pre-orders.
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 3
+ *                               name:
+ *                                 type: string
+ *                                 example: Sokha Chan
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -340,6 +351,17 @@
  *                     totalAmount:
  *                       type: number
  *                       example: 12.50
+ *                     user:
+ *                       type: object
+ *                       nullable: true
+ *                       description: Staff member who created the order. Null for guest pre-orders.
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                           example: 3
+ *                         name:
+ *                           type: string
+ *                           example: Sokha Chan
  *                     items:
  *                       type: array
  *                       items:

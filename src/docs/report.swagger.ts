@@ -323,6 +323,55 @@
  *               type: string
  *               example: '"Order Number","Date","Cashier","Type","Total (USD)","Currency","Amount Received","Payment Status"\n"ORD-072165","2026-05-19T03:17:29.000Z","System","dine_in","3.00","USD","3.00","paid"'
  *
+ * /api/reports/exports/sales-summary:
+ *   get:
+ *     tags:
+ *       - Reports
+ *     summary: Export the Sales Summary ("Menu Performance") workbook
+ *     description: >
+ *       Streams a styled .xlsx workbook for an inclusive range of shop-local calendar days.
+ *       The sheet carries one row-block per day; inside a day every item is split by payment
+ *       method, with quantity sold, gross sales, discounts (comps plus each line's pro-rata
+ *       share of order promotions) and net sales. Only sold orders are counted (paid and
+ *       partially-refunded, excluding cancelled), and cancelled line quantities are dropped.
+ *       Responds 204 when the window has no sales.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-08-01"
+ *         required: true
+ *         description: First shop-local calendar day to include (YYYY-MM-DD).
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-08-07"
+ *         required: true
+ *         description: Last shop-local calendar day to include (YYYY-MM-DD); must be on or after startDate.
+ *     responses:
+ *       200:
+ *         description: Workbook generated successfully. Filename is in the Content-Disposition header.
+ *         headers:
+ *           Content-Disposition:
+ *             schema:
+ *               type: string
+ *               example: 'attachment; filename="SalesSummary_2026-08-01_to_2026-08-07.xlsx"'
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       204:
+ *         description: No sales in the requested period, so no workbook was produced.
+ *       400:
+ *         description: Invalid or reversed date range.
+ *
  * /api/reports/daily-summary:
  *   get:
  *     tags:
@@ -340,6 +389,14 @@
  *           example: "2026-07-22"
  *         required: false
  *         description: The target date to summarize, in YYYY-MM-DD format. Defaults to today when omitted.
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-07-25"
+ *         required: false
+ *         description: Widens the summary to the inclusive window [date, endDate]. Requires `date`, and must be on or after it.
  *     responses:
  *       200:
  *         description: Daily summary retrieved successfully

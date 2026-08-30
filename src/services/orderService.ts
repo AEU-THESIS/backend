@@ -769,6 +769,9 @@ export const orderService = {
               options: true,
             },
           },
+          // Staff member who rang the order up. Null for guest pre-orders placed
+          // through the Telegram Mini App, which carry no `userId`.
+          user: { select: { id: true, name: true } },
           promotion: {
             select: { id: true, name: true, discountType: true, discountValue: true },
           },
@@ -807,6 +810,9 @@ export const orderService = {
             options: true,
           },
         },
+        // Staff member who rang the order up. Null for guest pre-orders placed
+        // through the Telegram Mini App, which carry no `userId`.
+        user: { select: { id: true, name: true } },
         promotion: {
           select: { id: true, name: true, discountType: true, discountValue: true },
         },

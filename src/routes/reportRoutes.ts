@@ -18,6 +18,7 @@ router.get('/item-performance', reportingRoles, reportController.getItemPerforma
 router.get('/category-performance', reportingRoles, reportController.getCategoryPerformance)
 router.get('/inventory-insights', reportingRoles, reportController.getInventoryInsights)
 router.get('/exports', reportingRoles, reportController.exportCSV)
+router.get('/exports/sales-summary', reportingRoles, reportController.exportSalesSummary)
 
 // Daily summary is additionally available to Cashiers.
 router.get(
