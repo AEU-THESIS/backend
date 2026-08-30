@@ -192,6 +192,15 @@
  *           format: date
  *         description: End date range (YYYY-MM-DD)
  *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: >-
+ *           Restrict the list to the orders taken by one cashier. A Cashier is forced
+ *           onto their own id server-side, so it can only ever return their own sales;
+ *           Admins and Managers may filter by any staff member.
+ *       - in: query
  *         name: page
  *         schema:
  *           type: integer
@@ -243,7 +252,7 @@
  *                           user:
  *                             type: object
  *                             nullable: true
- *                             description: Staff member who created the order. Null for guest pre-orders.
+ *                             description: The cashier who took the order. Null for an order with no recorded staff member (clients show "System").
  *                             properties:
  *                               id:
  *                                 type: integer
@@ -251,6 +260,10 @@
  *                               name:
  *                                 type: string
  *                                 example: Sokha Chan
+ *                               employeeId:
+ *                                 type: string
+ *                                 nullable: true
+ *                                 example: EMP-004
  *                     pagination:
  *                       type: object
  *                       properties:
@@ -354,7 +367,7 @@
  *                     user:
  *                       type: object
  *                       nullable: true
- *                       description: Staff member who created the order. Null for guest pre-orders.
+ *                       description: The cashier who took the order. Null for an order with no recorded staff member (clients show "System").
  *                       properties:
  *                         id:
  *                           type: integer
@@ -362,6 +375,10 @@
  *                         name:
  *                           type: string
  *                           example: Sokha Chan
+ *                         employeeId:
+ *                           type: string
+ *                           nullable: true
+ *                           example: EMP-004
  *                     items:
  *                       type: array
  *                       items:
@@ -446,6 +463,21 @@
  *                     fulfillmentStatus:
  *                       type: string
  *                       example: ready
+ *                     user:
+ *                       type: object
+ *                       nullable: true
+ *                       description: The cashier who took the order. Null for an order with no recorded staff member (clients show "System").
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                           example: 3
+ *                         name:
+ *                           type: string
+ *                           example: Sokha Chan
+ *                         employeeId:
+ *                           type: string
+ *                           nullable: true
+ *                           example: EMP-004
  *       400:
  *         description: Invalid status value, missing payload, or bad order ID
  *       401:
