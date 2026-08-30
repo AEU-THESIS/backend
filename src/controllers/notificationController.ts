@@ -10,6 +10,7 @@ import { notificationService } from '../services/notificationService'
 import {
   getNotificationQuerySchema,
   notificationIdParamSchema,
+  bulkDeleteNotificationSchema,
 } from '../validations/notificationValidation'
 
 export const notificationController = {
@@ -48,8 +49,8 @@ export const notificationController = {
 
   deleteSelected: catchAsync(async (req: Request, res: Response) => {
     const shopId = req.user!.shop_id
-    const { ids } = req.body as { ids: number[] }
-    const result = await notificationService.deleteSelected(shopId, ids || [])
+    const { ids } = bulkDeleteNotificationSchema.parse(req.body)
+    const result = await notificationService.deleteSelected(shopId, ids)
     return sendSuccess(res, result, Messages.NOTIFICATION_DELETED, HttpStatus.OK)
   }),
 

@@ -387,7 +387,7 @@ export const promotionService = {
           dto.discountType === 'PERCENTAGE'
             ? `${dto.discountValue}% off`
             : dto.discountType === 'FIXED_AMOUNT'
-              ? `$${dto.discountValue} off`
+              ? `Fixed discount: ${dto.discountValue}`
               : 'Buy 1 Get 1 Free'
         void notificationService
           .createNotification(shopId, 'promotion_activated', 'promotion', id, {

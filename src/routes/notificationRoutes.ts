@@ -1,11 +1,13 @@
 import { Router } from 'express'
 import { notificationController } from '../controllers/notificationController'
 import { authenticate } from '../middlewares/authMiddleware'
+import { requireRoles } from '../middlewares/roleMiddleware'
+import { ROLES } from '../constants/roles'
 
 const router = Router()
 
 // All notification endpoints are scoped to authenticated staff
-router.use(authenticate)
+router.use(authenticate, requireRoles([ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER]))
 
 router.get('/', notificationController.getAll)
 router.get('/unread-count', notificationController.getUnreadCount)

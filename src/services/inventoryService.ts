@@ -118,7 +118,7 @@ const getExistingInventoryItem = async (id: number, shopId: number) => {
   return item
 }
 
-const checkAndNotifyStockStatus = (
+const checkAndNotifyStockStatus = async (
   shopId: number,
   item: {
     id: number
@@ -129,10 +129,10 @@ const checkAndNotifyStockStatus = (
     status: string
   }
 ) => {
-  if (item.status === 'out_of_stock') {
-    // Resolve any previous low_stock alerts for this item since it has escalated to out of stock
-    void prisma.notification
-      .updateMany({
+  try {
+    if (item.status === 'out_of_stock') {
+      // Resolve any previous low_stock alerts for this item since it has escalated to out of stock
+      await prisma.notification.updateMany({
         where: {
           shopId,
           notifiableType: { in: ['ingredient', 'Ingredient'] },
@@ -142,23 +142,17 @@ const checkAndNotifyStockStatus = (
         },
         data: { readAt: new Date() },
       })
-      .catch(() => {})
 
-    void notificationService
-      .createNotification(shopId, 'out_of_stock', 'ingredient', item.id, {
+      await notificationService.createNotification(shopId, 'out_of_stock', 'ingredient', item.id, {
         title: `Out of Stock: ${item.name}`,
         description: `Current stock has reached 0 ${item.unitOfMeasure}`,
         ingredientId: item.id,
         ingredientName: item.name,
         navigateTo: '/inventory',
       })
-      .catch(err => {
-        console.error('⚠️ [notification] out-of-stock notification failed:', err)
-      })
-  } else if (item.status === 'low_stock') {
-    // Resolve any previous out_of_stock alerts for this item if it was partially restocked to low stock
-    void prisma.notification
-      .updateMany({
+    } else if (item.status === 'low_stock') {
+      // Resolve any previous out_of_stock alerts for this item if it was partially restocked to low stock
+      await prisma.notification.updateMany({
         where: {
           shopId,
           notifiableType: { in: ['ingredient', 'Ingredient'] },
@@ -168,10 +162,8 @@ const checkAndNotifyStockStatus = (
         },
         data: { readAt: new Date() },
       })
-      .catch(() => {})
 
-    void notificationService
-      .createNotification(shopId, 'low_stock', 'ingredient', item.id, {
+      await notificationService.createNotification(shopId, 'low_stock', 'ingredient', item.id, {
         title: `Low Stock: ${item.name}`,
         description: `Only ${item.quantity} ${item.unitOfMeasure} remaining (threshold: ${item.minAlertThreshold})`,
         ingredientId: item.id,
@@ -179,13 +171,9 @@ const checkAndNotifyStockStatus = (
         targetRole: 'Admin',
         navigateTo: '/inventory',
       })
-      .catch(err => {
-        console.error('⚠️ [notification] low-stock notification failed:', err)
-      })
-  } else if (item.status === 'in_stock') {
-    // Item is healthy again: auto-resolve any unread stock warnings for this item
-    void prisma.notification
-      .updateMany({
+    } else if (item.status === 'in_stock') {
+      // Item is healthy again: auto-resolve any unread stock warnings for this item
+      await prisma.notification.updateMany({
         where: {
           shopId,
           notifiableType: { in: ['ingredient', 'Ingredient'] },
@@ -194,7 +182,9 @@ const checkAndNotifyStockStatus = (
         },
         data: { readAt: new Date() },
       })
-      .catch(() => {})
+    }
+  } catch (err) {
+    console.error('⚠️ [notification] checkAndNotifyStockStatus failed:', err)
   }
 }
 
@@ -270,7 +260,7 @@ export const inventoryService = {
     })
 
     const mapped = mapInventoryItem(item)
-    checkAndNotifyStockStatus(shopId, mapped)
+    await checkAndNotifyStockStatus(shopId, mapped)
     return mapped
   },
 
@@ -313,7 +303,7 @@ export const inventoryService = {
     })
 
     const mapped = mapInventoryItem(item)
-    checkAndNotifyStockStatus(shopId, mapped)
+    await checkAndNotifyStockStatus(shopId, mapped)
     return mapped
   },
 
@@ -408,7 +398,7 @@ export const inventoryService = {
       return mapInventoryItem(updatedItem)
     })
 
-    checkAndNotifyStockStatus(shopId, result)
+    await checkAndNotifyStockStatus(shopId, result)
     return result
   },
 

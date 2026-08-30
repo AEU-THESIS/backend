@@ -22,13 +22,19 @@
  *         name: limit
  *         schema:
  *           type: integer
- *           default: 15
+ *           default: 20
  *         description: Number of items per page
  *       - in: query
  *         name: read
  *         schema:
  *           type: boolean
  *         description: Filter by read status (true for read, false for unread)
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [low_stock, out_of_stock, new_pre_order, promotion_toggle]
+ *         description: Filter by notification type
  *     responses:
  *       200:
  *         description: Notifications retrieved successfully
