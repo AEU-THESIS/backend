@@ -12,30 +12,31 @@ export function getItemReportRange(
   period: ItemReportPeriod,
   month?: string
 ): { start: Date; end: Date } {
-  const now = new Date()
+  // "now" is an absolute instant, correct regardless of timezone; every *day*
+  // boundary below is the shop's local calendar day, not the server's.
   const end = new Date()
+  const today = shopDateString(0)
 
   if (period === 'thisWeek') {
-    const start = new Date(now)
-    const mondayOffset = (start.getDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
-    start.setDate(start.getDate() - mondayOffset)
-    start.setHours(0, 0, 0, 0)
-    return { start, end }
+    const mondayOffset = (shopNowParts().weekday + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
+    return { start: shopDayStartUtc(shiftDateString(today, -mondayOffset)), end }
   }
 
   if (period === 'thisMonth') {
-    return { start: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0), end }
+    return { start: shopDayStartUtc(shopMonthFirst(0)), end }
   }
 
   if (period === 'thisYear') {
-    return { start: new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0), end }
+    return { start: shopDayStartUtc(`${shopNowParts().year}-01-01`), end }
   }
 
-  // specific: a single "YYYY-MM" month, from its first to last day.
+  // specific: a single "YYYY-MM" month, from its first to last shop-local day.
   const [year, monthNum] = (month ?? '').split('-').map(Number)
+  const mm = String(monthNum).padStart(2, '0')
+  const lastDay = String(daysInMonth(year, monthNum)).padStart(2, '0')
   return {
-    start: new Date(year, monthNum - 1, 1, 0, 0, 0, 0),
-    end: new Date(year, monthNum, 0, 23, 59, 59, 999),
+    start: shopDayStartUtc(`${year}-${mm}-01`),
+    end: shopDayEndUtc(`${year}-${mm}-${lastDay}`),
   }
 }
 
@@ -58,43 +59,57 @@ export function getKpiRange(
   prevStart: Date
   prevEnd: Date
 } {
+  // Windows are anchored to the shop's local calendar day; `now` stays an
+  // absolute instant so the current partial day runs up to the present moment.
   const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
-  const endOfDay = (d: Date) =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
-  const addDays = (d: Date, n: number) => {
-    const copy = new Date(d)
-    copy.setDate(copy.getDate() + n)
-    return copy
-  }
+  const today = shopDateString(0)
 
   if (range === 'today') {
-    const prevStart = addDays(startOfToday, -1)
-    return { start: startOfToday, end: now, prevStart, prevEnd: endOfDay(prevStart) }
+    const prevDay = shiftDateString(today, -1)
+    return {
+      start: shopDayStartUtc(today),
+      end: now,
+      prevStart: shopDayStartUtc(prevDay),
+      prevEnd: shopDayEndUtc(prevDay),
+    }
   }
 
   if (range === 'yesterday') {
-    const start = addDays(startOfToday, -1)
-    const prevStart = addDays(startOfToday, -2)
-    return { start, end: endOfDay(start), prevStart, prevEnd: endOfDay(prevStart) }
+    const day = shiftDateString(today, -1)
+    const prevDay = shiftDateString(today, -2)
+    return {
+      start: shopDayStartUtc(day),
+      end: shopDayEndUtc(day),
+      prevStart: shopDayStartUtc(prevDay),
+      prevEnd: shopDayEndUtc(prevDay),
+    }
   }
 
   if (range === 'last7') {
-    const start = addDays(startOfToday, -6)
-    const prevStart = addDays(startOfToday, -13)
-    const prevEnd = endOfDay(addDays(startOfToday, -7))
-    return { start, end: now, prevStart, prevEnd }
+    // Inclusive 7-day window (today and the six days before it), compared with
+    // the seven days immediately preceding that.
+    return {
+      start: shopDayStartUtc(shiftDateString(today, -6)),
+      end: now,
+      prevStart: shopDayStartUtc(shiftDateString(today, -13)),
+      prevEnd: shopDayEndUtc(shiftDateString(today, -7)),
+    }
   }
 
   if (range === 'yearly') {
     // year-to-date vs the same span of the previous year.
-    const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0)
-    const prevStart = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0)
-    const prevEnd = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 23, 59, 59, 999)
-    return { start, end: now, prevStart, prevEnd }
+    const { year } = shopNowParts()
+    const dayOfYear = daysBetween(`${year}-01-01`, today)
+    return {
+      start: shopDayStartUtc(`${year}-01-01`),
+      end: now,
+      prevStart: shopDayStartUtc(`${year - 1}-01-01`),
+      prevEnd: shopDayEndUtc(shiftDateString(`${year - 1}-01-01`, dayOfYear)),
+    }
   }
 
   if (range === 'custom') {
+    // Explicit window: the caller already supplies absolute start/end instants.
     const start = new Date(startDate as string)
     const end = new Date(endDate as string)
     // Previous window: same duration, ending the instant before `start`.
@@ -105,10 +120,15 @@ export function getKpiRange(
   }
 
   // monthly: month-to-date vs the same span of the previous month.
-  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
-  const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0)
-  const prevEnd = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate(), 23, 59, 59, 999)
-  return { start, end: now, prevStart, prevEnd }
+  const first = shopMonthFirst(0)
+  const prevFirst = shopMonthFirst(-1)
+  const dayOfMonth = daysBetween(first, today) // 0-based offset into the month
+  return {
+    start: shopDayStartUtc(first),
+    end: now,
+    prevStart: shopDayStartUtc(prevFirst),
+    prevEnd: shopDayEndUtc(shiftDateString(prevFirst, dayOfMonth)),
+  }
 }
 
 /**
@@ -127,44 +147,46 @@ export function buildRangeBuckets(
   end: Date
 ): { points: { label: string; value: number }[]; bucketIndex: (d: Date) => number } {
   const dayMs = 86400000
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0)
-  const spanDays = (end.getTime() - start.getTime()) / dayMs
+  // Work entirely in the shop's wall clock: shifting an instant by the shop
+  // offset lets the UTC getters read the shop's local Y/M/D/H, so buckets and
+  // the labels on them line up with the shop's calendar (not the server's).
+  const s = toShopWallClock(start)
+  const e = toShopWallClock(end)
+  const startOfDayMs = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+  const spanDays = (e.getTime() - s.getTime()) / dayMs
   const points: { label: string; value: number }[] = []
 
   if (spanDays <= 1.5) {
     const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`
     for (let h = 0; h < 24; h++) points.push({ label: hourLabel(h), value: 0 })
-    return { points, bucketIndex: d => d.getHours() }
+    return { points, bucketIndex: d => toShopWallClock(d).getUTCHours() }
   }
 
   if (spanDays <= 31) {
-    const s = startOfDay(start)
-    const days = Math.floor((startOfDay(end).getTime() - s.getTime()) / dayMs) + 1
+    const s0 = startOfDayMs(s)
+    const days = Math.floor((startOfDayMs(e) - s0) / dayMs) + 1
     for (let i = 0; i < days; i++) {
-      const d = new Date(s)
-      d.setDate(s.getDate() + i)
-      points.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, value: 0 })
+      const d = new Date(s0 + i * dayMs)
+      points.push({ label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 })
     }
     return {
       points,
-      bucketIndex: d => Math.floor((startOfDay(d).getTime() - s.getTime()) / dayMs),
+      bucketIndex: d => Math.floor((startOfDayMs(toShopWallClock(d)) - s0) / dayMs),
     }
   }
 
   if (spanDays <= 92) {
     // Monday-aligned weeks.
-    const s = startOfDay(start)
-    const mondayOffset = (s.getDay() + 6) % 7
-    s.setDate(s.getDate() - mondayOffset)
-    const weeks = Math.floor((startOfDay(end).getTime() - s.getTime()) / (dayMs * 7)) + 1
+    const mondayOffset = (new Date(startOfDayMs(s)).getUTCDay() + 6) % 7
+    const s0 = startOfDayMs(s) - mondayOffset * dayMs
+    const weeks = Math.floor((startOfDayMs(e) - s0) / (dayMs * 7)) + 1
     for (let i = 0; i < weeks; i++) {
-      const d = new Date(s)
-      d.setDate(s.getDate() + i * 7)
-      points.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, value: 0 })
+      const d = new Date(s0 + i * 7 * dayMs)
+      points.push({ label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 })
     }
     return {
       points,
-      bucketIndex: d => Math.floor((startOfDay(d).getTime() - s.getTime()) / (dayMs * 7)),
+      bucketIndex: d => Math.floor((startOfDayMs(toShopWallClock(d)) - s0) / (dayMs * 7)),
     }
   }
 
@@ -184,22 +206,24 @@ export function buildRangeBuckets(
   ]
   if (spanDays <= 366) {
     const count =
-      (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1
+      (e.getUTCFullYear() - s.getUTCFullYear()) * 12 + (e.getUTCMonth() - s.getUTCMonth()) + 1
     for (let i = 0; i < count; i++) {
-      const d = new Date(start.getFullYear(), start.getMonth() + i, 1)
-      points.push({ label: months[d.getMonth()], value: 0 })
+      const d = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + i, 1))
+      points.push({ label: months[d.getUTCMonth()], value: 0 })
     }
     return {
       points,
-      bucketIndex: d =>
-        (d.getFullYear() - start.getFullYear()) * 12 + (d.getMonth() - start.getMonth()),
+      bucketIndex: d => {
+        const w = toShopWallClock(d)
+        return (w.getUTCFullYear() - s.getUTCFullYear()) * 12 + (w.getUTCMonth() - s.getUTCMonth())
+      },
     }
   }
 
-  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+  for (let y = s.getUTCFullYear(); y <= e.getUTCFullYear(); y++) {
     points.push({ label: String(y), value: 0 })
   }
-  return { points, bucketIndex: d => d.getFullYear() - start.getFullYear() }
+  return { points, bucketIndex: d => toShopWallClock(d).getUTCFullYear() - s.getUTCFullYear() }
 }
 
 /**
@@ -255,6 +279,48 @@ export function shopDateString(dayOffset = 0): string {
   return `${year}-${month}-${day}`
 }
 
+/** Year / month (1-12) / day / weekday (0=Sun) of "now" in the shop's calendar. */
+function shopNowParts(): { year: number; month: number; day: number; weekday: number } {
+  const shopNow = new Date(Date.now() + SHOP_UTC_OFFSET_MINUTES * 60_000)
+  return {
+    year: shopNow.getUTCFullYear(),
+    month: shopNow.getUTCMonth() + 1,
+    day: shopNow.getUTCDate(),
+    weekday: shopNow.getUTCDay(),
+  }
+}
+
+/** Number of days in the given calendar month (month is 1-12). */
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+/** Shifts a `YYYY-MM-DD` string by whole days, returning a `YYYY-MM-DD` string. */
+function shiftDateString(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.slice(0, 10).split('-').map(Number)
+  const shifted = new Date(Date.UTC(year, month - 1, day) + days * 86_400_000)
+  const yy = shifted.getUTCFullYear()
+  const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(shifted.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+/** Whole days from `fromStr` to `toStr` (both `YYYY-MM-DD`); non-negative when to ≥ from. */
+function daysBetween(fromStr: string, toStr: string): number {
+  const [fy, fm, fd] = fromStr.slice(0, 10).split('-').map(Number)
+  const [ty, tm, td] = toStr.slice(0, 10).split('-').map(Number)
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000)
+}
+
+/** `YYYY-MM-01` for the shop-local month `monthOffset` months from the current one. */
+function shopMonthFirst(monthOffset = 0): string {
+  const { year, month } = shopNowParts()
+  const idx = year * 12 + (month - 1) + monthOffset
+  const y = Math.floor(idx / 12)
+  const m = (idx % 12) + 1
+  return `${y}-${String(m).padStart(2, '0')}-01`
+}
+
 /**
  * The shop-local calendar date (`YYYY-MM-DD`) a UTC instant falls on. Use this to
  * bucket stored timestamps into local days (an order placed just after local
@@ -279,22 +345,30 @@ export function toShopWallClock(date: Date): Date {
 }
 
 /**
- * Calculates the start date based on the specified period.
+ * Calculates the start instant (shop-local midnight) for the specified period:
+ *   daily   → the start of the shop's today
+ *   weekly  → the start of the shop's day seven days ago
+ *   monthly → the start of the same day-of-month one month ago (clamped)
+ * The window runs from this instant up to now, evaluated against the shop's
+ * calendar day rather than the server's timezone.
  */
 export function getPeriodStartDate(period: 'daily' | 'weekly' | 'monthly'): Date {
-  const date = new Date()
-  if (period === 'daily') {
-    date.setHours(0, 0, 0, 0)
-  } else if (period === 'weekly') {
-    date.setDate(date.getDate() - 7)
-    date.setHours(0, 0, 0, 0)
-  } else if (period === 'monthly') {
-    const originalDay = date.getDate()
-    date.setDate(1) // Avoid overflow when decrementing
-    date.setMonth(date.getMonth() - 1)
-    const daysInPreviousMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
-    date.setDate(Math.min(originalDay, daysInPreviousMonth))
-    date.setHours(0, 0, 0, 0)
+  const today = shopDateString(0)
+
+  if (period === 'weekly') {
+    return shopDayStartUtc(shiftDateString(today, -7))
   }
-  return date
+
+  if (period === 'monthly') {
+    const { year, month, day } = shopNowParts()
+    const idx = year * 12 + (month - 1) - 1 // previous month
+    const py = Math.floor(idx / 12)
+    const pm = (idx % 12) + 1
+    const clampedDay = Math.min(day, daysInMonth(py, pm))
+    const dateStr = `${py}-${String(pm).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`
+    return shopDayStartUtc(dateStr)
+  }
+
+  // daily
+  return shopDayStartUtc(today)
 }
