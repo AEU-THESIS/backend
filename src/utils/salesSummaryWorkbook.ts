@@ -102,22 +102,30 @@ const COLOR_DISCOUNT = 'FFB91C1C'
 const FONT_DISCOUNT: Partial<Font> = { name: 'Arial', size: 10, color: { argb: COLOR_DISCOUNT } }
 const FONT_TOTAL_DISCOUNT: Partial<Font> = { ...FONT_TOTAL, color: { argb: COLOR_DISCOUNT } }
 
-const FILL_HEADER: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } }
+// Header row fill uses the app's primary brand colour (amber-700, #b45309) so the
+// export reads as part of the same product, with white header text on top.
+const FILL_HEADER: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB45309' } }
 const FILL_TOTAL: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }
 
+const STYLE_CASH = {
+  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } } as Fill,
+  font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF166534' } } as Partial<Font>,
+}
+const STYLE_KHQR = {
+  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } } as Fill,
+  font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1E40AF' } } as Partial<Font>,
+}
+
 /**
- * Tinted chips for column D, so a day's Cash and QR rows separate at a glance.
- * Keyed on the lowercased label; anything unmapped (COD, Unknown) stays plain.
+ * Tinted chips for column D, so a day's Cash and KHQR rows separate at a glance.
+ * KHQR labels vary by bank (e.g. "KHQR — ABA"), so they're matched on prefix;
+ * anything unmapped (COD, Unknown) stays plain.
  */
-const PAYMENT_METHOD_STYLES: Record<string, { fill: Fill; font: Partial<Font> }> = {
-  cash: {
-    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } },
-    font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF166534' } },
-  },
-  qr: {
-    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } },
-    font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1E40AF' } },
-  },
+const paymentMethodStyle = (label: string): { fill: Fill; font: Partial<Font> } | undefined => {
+  const key = label.trim().toLowerCase()
+  if (key === 'cash') return STYLE_CASH
+  if (key.startsWith('khqr') || key === 'qr') return STYLE_KHQR
+  return undefined
 }
 
 const GRID = { style: 'thin', color: { argb: 'FFD1D5DB' } } as const
@@ -241,7 +249,7 @@ export const buildSalesSummaryWorkbook = (
         method.border = rowBorder
         method.alignment = { horizontal: 'center' }
 
-        const methodStyle = PAYMENT_METHOD_STYLES[paymentRow.paymentMethod.trim().toLowerCase()]
+        const methodStyle = paymentMethodStyle(paymentRow.paymentMethod)
         method.font = methodStyle?.font ?? FONT_ITEM
         if (methodStyle) method.fill = methodStyle.fill
 

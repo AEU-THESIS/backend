@@ -498,6 +498,7 @@ export const reportService = {
         select: {
           createdAt: true,
           paymentMethod: true,
+          bankName: true,
           discountAmount: true,
           items: {
             select: {
