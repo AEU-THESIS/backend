@@ -326,3 +326,97 @@
  *       403: { description: Forbidden (requires Admin or Manager) }
  *       404: { description: Item not found }
  */
+
+/**
+ * @openapi
+ * /api/inventories/exports/expense-report:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Download the Expense Report workbook (.xlsx)
+ *     description: |
+ *       Streams the styled Purchase Spend workbook for a date range: banner, KPI cards,
+ *       an embedded daily-spend chart, and every individual purchase in the period.
+ *       Ranges spanning more than one calendar month move the purchase table onto one
+ *       sheet per month. The workbook is generated server-side, so the response is binary.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *         description: Inclusive range start (ISO 8601)
+ *       - in: query
+ *         name: endDate
+ *         required: true
+ *         schema: { type: string, format: date-time }
+ *         description: Inclusive range end (ISO 8601)
+ *       - in: query
+ *         name: locale
+ *         schema: { type: string, enum: [en, kh], default: en }
+ *         description: Language the workbook's labels, dates and numbers are written in.
+ *     responses:
+ *       200:
+ *         description: The workbook
+ *         headers:
+ *           Content-Disposition:
+ *             schema: { type: string }
+ *             example: 'attachment; filename="inventory-expense-report_2026-08-01_2026-08-31.xlsx"'
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema: { type: string, format: binary }
+ *       400: { description: Invalid or inverted date range, or unknown locale }
+ *       401: { description: Unauthorized }
+ *       403: { description: Forbidden (requires Admin or Manager) }
+ */
+
+/**
+ * @openapi
+ * /api/inventories/exports/history/{id}:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Download one item's Stock History workbook (.xlsx)
+ *     description: |
+ *       Streams the styled stock-movement workbook for a single item: banner, KPI cards,
+ *       an embedded daily net-value chart, and every movement in the range — not just the
+ *       page the on-screen table is showing. Ranges spanning more than one calendar month
+ *       move the movement table onto one sheet per month. The response is binary.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *         description: Inventory item id
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date-time }
+ *         description: Inclusive range start (ISO 8601)
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date-time }
+ *         description: Inclusive range end (ISO 8601)
+ *       - in: query
+ *         name: type
+ *         schema: { type: string, enum: [add, remove] }
+ *         description: Restrict the exported rows to stock-ins ("add") or removals ("remove"); omit for both. Does not affect the totalIn/totalOut KPI cards, which always cover the full range.
+ *       - in: query
+ *         name: locale
+ *         schema: { type: string, enum: [en, kh], default: en }
+ *         description: Language the workbook's labels, dates and numbers are written in.
+ *     responses:
+ *       200:
+ *         description: The workbook
+ *         headers:
+ *           Content-Disposition:
+ *             schema: { type: string }
+ *             example: 'attachment; filename="stock-history_arabica-beans_2026-08-01_2026-08-31.xlsx"'
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema: { type: string, format: binary }
+ *       400: { description: Invalid id, date range, or unknown locale }
+ *       401: { description: Unauthorized }
+ *       403: { description: Forbidden (requires Admin or Manager) }
+ *       404: { description: Item not found }
+ */
