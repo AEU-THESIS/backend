@@ -303,6 +303,9 @@ async function performCancellation(
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
     const { orderType, paymentMethod, paymentCurrency, receivedAmount, items } = payload
+    // Bank is only meaningful for a manual KHQR payment; never store one against a
+    // cash order even if a stray value slips through.
+    const bankName = paymentMethod === 'khqr' ? (payload.bankName ?? null) : null
 
     // ── 1. Validate all products belong to this shop ──────────────────
     const productIds = items.map(i => i.productId)
@@ -565,6 +568,7 @@ export const orderService = {
             // exactly even if the shop later changes its exchange rate.
             exchangeRateSnapshot: exchangeRate,
             paymentMethod,
+            bankName,
             // A fully-comp order is `comp` (excluded from paid-only sales queries);
             // otherwise it is a normal paid sale — a mixed order (paid + comp lines)
             // still charges for the paid items and stays `paid`.
@@ -637,6 +641,10 @@ export const orderService = {
       paymentCurrency,
       changeAmount,
       exchangeRateSnapshot: exchangeRate,
+      // Echo the payment method + bank so the checkout-success receipt can show
+      // "Paid via KHQR — ABA" without a follow-up fetch.
+      paymentMethod: order.paymentMethod,
+      bankName: order.bankName,
       paymentStatus: order.paymentStatus,
       fulfillmentStatus: order.fulfillmentStatus,
     }

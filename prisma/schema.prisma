@@ -69,6 +69,10 @@ model Shop {
   phone                    String?
   address                  String?  @db.Text
   bakongAccountId          String?  @map("bakong_account_id")
+  // Admin-configurable list of banks a customer may pay via manual KHQR (e.g.
+  // ["ABA","ACLEDA","Wing"]). Served to the POS bank selector. Null/empty is
+  // coalesced to a default of ["ABA"] in the service layer.
+  paymentBanks             Json?    @map("payment_banks")
   currencySymbol           String   @default("$") @map("currency_symbol")
   exchangeRate             Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
   receiptFooter            String?  @map("receipt_footer") @db.Text
@@ -541,6 +545,10 @@ model Order {
 
   paymentMethod String  @map("payment_method")
   khqrString    String? @map("khqr_string") @db.Text
+  // Bank the customer used for a manual KHQR (bank transfer) payment — recorded by
+  // staff at checkout for reporting. Null for cash orders. Chosen from the shop's
+  // configurable `paymentBanks` list (see Shop.paymentBanks).
+  bankName      String? @map("bank_name")
 
   paymentStatus     OrderPaymentStatus     @map("payment_status")
   fulfillmentStatus OrderFulfillmentStatus @map("fulfillment_status")

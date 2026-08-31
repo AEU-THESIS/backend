@@ -2,6 +2,25 @@ import { z } from 'zod'
 
 const optionalText = z.string().trim().nullable().optional()
 
+// Admin-configurable list of banks for manual KHQR payments. Trims, drops blanks, and
+// de-duplicates case-insensitively (preserving first-seen order) so the stored list is
+// always clean. An empty list is allowed here and coalesced to the default on read.
+const bankListSchema = z
+  .array(z.string().trim().min(1, 'Bank name is required').max(191, 'Bank name is too long'))
+  .max(50, 'Too many banks')
+  .transform(list => {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const bank of list) {
+      const key = bank.toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        result.push(bank)
+      }
+    }
+    return result
+  })
+
 const decimalSchema = z
   .union([
     z
@@ -43,6 +62,8 @@ export const updateShopSettingsSchema = z
     address: optionalText,
     bakongAccountId: optionalText,
     bakong_account_id: optionalText,
+    paymentBanks: bankListSchema.optional(),
+    payment_banks: bankListSchema.optional(),
     currencySymbol: z.string().trim().min(1).optional(),
     currency_symbol: z.string().trim().min(1).optional(),
     exchangeRate: decimalSchema.optional(),
@@ -59,6 +80,7 @@ export const updateShopSettingsSchema = z
     const aliasPairs = [
       ['ownerName', 'owner_name'],
       ['bakongAccountId', 'bakong_account_id'],
+      ['paymentBanks', 'payment_banks'],
       ['currencySymbol', 'currency_symbol'],
       ['exchangeRate', 'exchange_rate'],
       ['receiptFooter', 'receipt_footer'],
@@ -88,6 +110,8 @@ export const updateShopSettingsSchema = z
     ...(data.bakong_account_id !== undefined && {
       bakongAccountId: data.bakong_account_id,
     }),
+    ...(data.paymentBanks !== undefined && { paymentBanks: data.paymentBanks }),
+    ...(data.payment_banks !== undefined && { paymentBanks: data.payment_banks }),
     ...(data.currencySymbol !== undefined && {
       currencySymbol: data.currencySymbol,
     }),
