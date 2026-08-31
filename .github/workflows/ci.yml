@@ -71,12 +71,17 @@ jobs:
     needs: [verify, docker-build, secret-scan]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Send Telegram Hype Notification
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
           COMMIT_URL: ${{ github.event.head_commit.url }}
           ACTOR: ${{ github.actor }}
@@ -99,27 +104,62 @@ jobs:
             esac
           }
 
-          TG_USER=$(map_user "$ACTOR")
+          # The person who pushed the merge to dev is the fallback merger identity.
+          MERGER_LOGIN="$ACTOR"
+          # Author/assignee default to the merger until we can resolve the PR itself.
+          AUTHOR_LOGIN="$ACTOR"
+          ASSIGNEE_LOGIN=""
           TASK_TITLE=$(echo "$COMMIT_MSG" | head -n 1)
+          LINK_URL="$COMMIT_URL"
+          LINK_LABEL="View Commit on GitHub"
+
+          # A merge to dev arrives as a push, so github.actor is the MERGER, not the PR
+          # author. Recover the PR number from the merge commit ("Merge pull request #56 ..."
+          # or a squash commit ending in "(#56)") and ask the GitHub API who actually
+          # authored it, so the greeting mentions the developer instead of the merger.
+          PR_NUMBER=$(echo "$COMMIT_MSG" | grep -oE '#[0-9]+' | head -n 1 | tr -d '#')
+          if [ -n "$PR_NUMBER" ] && [ -n "$GH_TOKEN" ]; then
+            PR_JSON=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/pulls/$PR_NUMBER")
+
+            API_AUTHOR=$(echo "$PR_JSON" | jq -r '.user.login // empty')
+            API_ASSIGNEE=$(echo "$PR_JSON" | jq -r '.assignee.login // (.assignees[0].login) // empty')
+            API_MERGED_BY=$(echo "$PR_JSON" | jq -r '.merged_by.login // empty')
+            API_TITLE=$(echo "$PR_JSON" | jq -r '.title // empty')
+            API_URL=$(echo "$PR_JSON" | jq -r '.html_url // empty')
+
+            [ -n "$API_AUTHOR" ] && AUTHOR_LOGIN="$API_AUTHOR"
+            [ -n "$API_ASSIGNEE" ] && ASSIGNEE_LOGIN="$API_ASSIGNEE"
+            [ -n "$API_MERGED_BY" ] && MERGER_LOGIN="$API_MERGED_BY"
+            [ -n "$API_TITLE" ] && TASK_TITLE="$API_TITLE"
+            if [ -n "$API_URL" ]; then
+              LINK_URL="$API_URL"
+              LINK_LABEL="View the Pull Request"
+            fi
+          fi
+
+          # When the PR has no explicit assignee, treat the author as the assignee.
+          [ -z "$ASSIGNEE_LOGIN" ] && ASSIGNEE_LOGIN="$AUTHOR_LOGIN"
+
+          DEV_USER=$(map_user "$AUTHOR_LOGIN")
+          MERGED_BY=$(map_user "$MERGER_LOGIN")
+          ASSIGNEE=$(map_user "$ASSIGNEE_LOGIN")
+
           if [ -z "$TASK_TITLE" ]; then
             TASK_TITLE="Update dev branch"
           fi
 
-          JIRA_ID=$(echo "$COMMIT_MSG" | grep -oE '[A-Z]+-[0-9]+' | head -n 1 || echo "")
+          JIRA_ID=$(echo "$COMMIT_MSG $TASK_TITLE" | grep -oE '[A-Z]+-[0-9]+' | head -n 1 || echo "")
           TICKET_LINE=""
           if [ -n "$JIRA_ID" ]; then
             TICKET_LINE="🎫 <b>Jira Ticket:</b> <a href=\"https://vorakyun.atlassian.net/browse/$JIRA_ID\">$JIRA_ID</a>\n"
           fi
 
           if [ "$VERIFY_RES" = "success" ] && [ "$BUILD_RES" = "success" ] && [ "$SCAN_RES" = "success" ]; then
-            MESSAGE="Hello $TG_USER your PR was Merged to Dev (backend)! 🚀\n\n- 👤 <b>Merged By:</b> $TG_USER\n- 📌 <b>Task:</b> $TASK_TITLE\n${TICKET_LINE}- 🔗 <a href=\"$COMMIT_URL\">View Commit on GitHub</a>\n- 🚦 <b>CI Status:</b> ✅ Succeeded\n\nEveryone pull the latest code and check it out! 🔥"
+            MESSAGE="Hello $DEV_USER your PR was Merged to Dev (backend)! 🚀\n\n- 👤 <b>Merged By:</b> $MERGED_BY\n- 🙋 <b>Assign to:</b> $ASSIGNEE\n- 📌 <b>Task:</b> $TASK_TITLE\n${TICKET_LINE}- 🔗 <a href=\"$LINK_URL\">$LINK_LABEL</a>\n- 🚦 <b>CI Status:</b> ✅ Succeeded\n\nEveryone pull the latest code and check it out! 🔥"
           else
-            MESSAGE="⚠️ <b>Backend CI Failed on Dev!</b> ❌\n\n- 👤 <b>Merged By:</b> $TG_USER\n- 📌 <b>Task:</b> $TASK_TITLE\n${TICKET_LINE}- 🔗 <a href=\"$COMMIT_URL\">View Commit on GitHub</a>\n- 🚦 <b>CI Status:</b> ❌ Failed (Please inspect Actions logs)"
-          fi
-
-          TOPIC_PARAM=""
-          if [ -n "$TELEGRAM_TOPIC_ID" ]; then
-            TOPIC_PARAM="\"message_thread_id\": \"$TELEGRAM_TOPIC_ID\","
+            MESSAGE="⚠️ <b>Backend CI Failed on Dev!</b> ❌\n\n- 👤 <b>Merged By:</b> $MERGED_BY\n- 🙋 <b>Assign to:</b> $ASSIGNEE\n- 📌 <b>Task:</b> $TASK_TITLE\n${TICKET_LINE}- 🔗 <a href=\"$LINK_URL\">$LINK_LABEL</a>\n- 🚦 <b>CI Status:</b> ❌ Failed (Please inspect Actions logs)"
           fi
 
           JSON_PAYLOAD=$(jq -n \
