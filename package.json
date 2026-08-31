@@ -24,7 +24,8 @@
   "homepage": "https://github.com/AEU-THESIS/backend#readme",
   "overrides": {
     "mariadb": "^3.5.3",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.0",
+    "deepmerge-ts": "^8.0.0"
   },
   "dependencies": {
     "@prisma/adapter-mariadb": "^7.6.0",
