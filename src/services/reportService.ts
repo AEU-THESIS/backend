@@ -284,15 +284,13 @@ export const reportService = {
     const now = new Date()
     const shopNow = toShopWallClock(now)
     let start: Date
-    const points: { label: string; value: number }[] = []
+    let points: { label: string; value: number }[]
     let bucketIndex: (d: Date) => number
 
     if (granularity === 'weekly') {
       const mondayOffset = (shopNow.getUTCDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
       start = shopDayStartUtc(shopDateString(-mondayOffset))
-      ;['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(label =>
-        points.push({ label, value: 0 })
-      )
+      points = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(label => ({ label, value: 0 }))
       bucketIndex = d => (toShopWallClock(d).getUTCDay() + 6) % 7
     } else if (granularity === 'monthly') {
       start = shopDayStartUtc(`${shopNow.getUTCFullYear()}-01-01`)
@@ -310,14 +308,15 @@ export const reportService = {
         'Nov',
         'Dec',
       ]
-      months.forEach(label => points.push({ label, value: 0 }))
+      points = months.map(label => ({ label, value: 0 }))
       bucketIndex = d => toShopWallClock(d).getUTCMonth()
     } else {
       const startYear = shopNow.getUTCFullYear() - 4
       start = shopDayStartUtc(`${startYear}-01-01`)
-      for (let y = startYear; y <= shopNow.getUTCFullYear(); y++) {
-        points.push({ label: String(y), value: 0 })
-      }
+      points = Array.from({ length: shopNow.getUTCFullYear() - startYear + 1 }, (_, i) => ({
+        label: String(startYear + i),
+        value: 0,
+      }))
       bucketIndex = d => toShopWallClock(d).getUTCFullYear() - startYear
     }
 
@@ -331,16 +330,16 @@ export const reportService = {
     })
 
     // Accumulate net sales into buckets in JS to stay database-dialect independent.
-    orders.forEach(o => {
+    for (const o of orders) {
       const idx = bucketIndex(o.createdAt)
       if (idx >= 0 && idx < points.length) {
         points[idx].value += Number(o.totalAmount)
       }
-    })
+    }
 
-    points.forEach(p => {
+    for (const p of points) {
       p.value = Math.round(p.value * 100) / 100
-    })
+    }
 
     return { granularity, points }
   },

@@ -154,21 +154,20 @@ export function buildRangeBuckets(
   const e = toShopWallClock(end)
   const startOfDayMs = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
   const spanDays = (e.getTime() - s.getTime()) / dayMs
-  const points: { label: string; value: number }[] = []
 
   if (spanDays <= 1.5) {
     const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`
-    for (let h = 0; h < 24; h++) points.push({ label: hourLabel(h), value: 0 })
+    const points = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: 0 }))
     return { points, bucketIndex: d => toShopWallClock(d).getUTCHours() }
   }
 
   if (spanDays <= 31) {
     const s0 = startOfDayMs(s)
     const days = Math.floor((startOfDayMs(e) - s0) / dayMs) + 1
-    for (let i = 0; i < days; i++) {
+    const points = Array.from({ length: days }, (_, i) => {
       const d = new Date(s0 + i * dayMs)
-      points.push({ label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 })
-    }
+      return { label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 }
+    })
     return {
       points,
       bucketIndex: d => Math.floor((startOfDayMs(toShopWallClock(d)) - s0) / dayMs),
@@ -180,10 +179,10 @@ export function buildRangeBuckets(
     const mondayOffset = (new Date(startOfDayMs(s)).getUTCDay() + 6) % 7
     const s0 = startOfDayMs(s) - mondayOffset * dayMs
     const weeks = Math.floor((startOfDayMs(e) - s0) / (dayMs * 7)) + 1
-    for (let i = 0; i < weeks; i++) {
+    const points = Array.from({ length: weeks }, (_, i) => {
       const d = new Date(s0 + i * 7 * dayMs)
-      points.push({ label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 })
-    }
+      return { label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 }
+    })
     return {
       points,
       bucketIndex: d => Math.floor((startOfDayMs(toShopWallClock(d)) - s0) / (dayMs * 7)),
@@ -207,10 +206,10 @@ export function buildRangeBuckets(
   if (spanDays <= 366) {
     const count =
       (e.getUTCFullYear() - s.getUTCFullYear()) * 12 + (e.getUTCMonth() - s.getUTCMonth()) + 1
-    for (let i = 0; i < count; i++) {
+    const points = Array.from({ length: count }, (_, i) => {
       const d = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + i, 1))
-      points.push({ label: months[d.getUTCMonth()], value: 0 })
-    }
+      return { label: months[d.getUTCMonth()], value: 0 }
+    })
     return {
       points,
       bucketIndex: d => {
@@ -220,9 +219,11 @@ export function buildRangeBuckets(
     }
   }
 
-  for (let y = s.getUTCFullYear(); y <= e.getUTCFullYear(); y++) {
-    points.push({ label: String(y), value: 0 })
-  }
+  const yearCount = e.getUTCFullYear() - s.getUTCFullYear() + 1
+  const points = Array.from({ length: yearCount }, (_, i) => ({
+    label: String(s.getUTCFullYear() + i),
+    value: 0,
+  }))
   return { points, bucketIndex: d => toShopWallClock(d).getUTCFullYear() - s.getUTCFullYear() }
 }
 
