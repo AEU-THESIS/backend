@@ -48,6 +48,7 @@ export const Messages = {
   ORDER_ITEM_PRICE_INVALID:
     'One or more items have an invalid price (a size or option must be selected)',
   INVALID_EXCHANGE_RATE: 'Shop exchange rate is invalid; please update it in Shop Settings',
+  INVALID_PAYMENT_BANK: 'Selected bank is not available for this shop',
   ORDERS_RETRIEVED: 'Orders retrieved successfully',
   // Void & item cancellation
   ORDER_VOIDED: 'Order voided and payment refunded',

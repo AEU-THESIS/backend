@@ -102,23 +102,10 @@ const COLOR_DISCOUNT = 'FFB91C1C'
 const FONT_DISCOUNT: Partial<Font> = { name: 'Arial', size: 10, color: { argb: COLOR_DISCOUNT } }
 const FONT_TOTAL_DISCOUNT: Partial<Font> = { ...FONT_TOTAL, color: { argb: COLOR_DISCOUNT } }
 
-const FILL_HEADER: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } }
+// Header row fill uses the app's primary brand colour (amber-700, #b45309) so the
+// export reads as part of the same product, with white header text on top.
+const FILL_HEADER: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB45309' } }
 const FILL_TOTAL: Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } }
-
-/**
- * Tinted chips for column D, so a day's Cash and QR rows separate at a glance.
- * Keyed on the lowercased label; anything unmapped (COD, Unknown) stays plain.
- */
-const PAYMENT_METHOD_STYLES: Record<string, { fill: Fill; font: Partial<Font> }> = {
-  cash: {
-    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } },
-    font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF166534' } },
-  },
-  qr: {
-    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } },
-    font: { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1E40AF' } },
-  },
-}
 
 const GRID = { style: 'thin', color: { argb: 'FFD1D5DB' } } as const
 /** Heavier rule that closes a day's block. */
@@ -205,7 +192,8 @@ export const buildSalesSummaryWorkbook = (
     cell.font = FONT_HEADER
     cell.fill = FILL_HEADER
     cell.border = BORDER_BOXED
-    cell.alignment = { horizontal: 'center', vertical: 'middle' }
+    // Payment method (column D) is left-aligned to match its left-aligned data.
+    cell.alignment = { horizontal: index === 3 ? 'left' : 'center', vertical: 'middle' }
   })
 
   // ── One block per day ─────────────────────────────────────────────────────
@@ -239,11 +227,10 @@ export const buildSalesSummaryWorkbook = (
         const method = row.getCell(4)
         method.value = paymentRow.paymentMethod
         method.border = rowBorder
-        method.alignment = { horizontal: 'center' }
-
-        const methodStyle = PAYMENT_METHOD_STYLES[paymentRow.paymentMethod.trim().toLowerCase()]
-        method.font = methodStyle?.font ?? FONT_ITEM
-        if (methodStyle) method.fill = methodStyle.fill
+        // Left-aligned plain text (no chip fill) so the column reads from the start,
+        // like the Item column.
+        method.alignment = { horizontal: 'left' }
+        method.font = FONT_ITEM
 
         const quantity = row.getCell(5)
         quantity.value = paymentRow.quantity

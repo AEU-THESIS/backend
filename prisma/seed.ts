@@ -52,6 +52,8 @@ async function main() {
       phone: '+855 12 345 678',
       address: 'Phnom Penh, Cambodia',
       receiptFooter: 'Thank you for visiting Routine Café & Bakery!☕',
+      // Default KHQR bank list shown in the POS bank selector (AT-112).
+      paymentBanks: ['ABA'],
     },
   })
 

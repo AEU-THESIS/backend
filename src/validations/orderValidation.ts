@@ -24,7 +24,13 @@ const OrderItemSchema = z.strictObject({
 export const CreateOrderSchema = z
   .strictObject({
     orderType: z.enum(['dine_in', 'takeaway']),
-    paymentMethod: z.literal('cash'),
+    // 'cash' = money tendered at the counter; 'khqr' = a manual KHQR bank transfer
+    // the customer already made, recorded by staff (no Bakong API integration — the
+    // customer tells the cashier which bank they used, see `bankName`).
+    paymentMethod: z.enum(['cash', 'khqr']),
+    // Bank the customer paid via for a KHQR order (e.g. "ABA"). Required when
+    // paymentMethod is 'khqr', ignored for cash. Cap matches the `bank_name` column.
+    bankName: z.string().trim().min(1).max(191).optional(),
     paymentCurrency: z.enum(['USD', 'KHR']),
     // Amount handed over, in the chosen payment currency. Allowed to be 0 so a
     // 100%-off order can be completed. The server owns the total and the exchange
@@ -44,6 +50,16 @@ export const CreateOrderSchema = z
         code: 'custom',
         path: ['receivedAmount'],
         message: 'KHR amount must be a whole number of 100៛ notes',
+      })
+    }
+
+    // A manual KHQR payment must record which bank the customer used, so the sale is
+    // attributable in reports. Cash orders never carry a bank.
+    if (data.paymentMethod === 'khqr' && !data.bankName) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['bankName'],
+        message: 'Bank name is required for KHQR payments',
       })
     }
   })

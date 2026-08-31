@@ -16,20 +16,35 @@ import type {
   SalesSummaryReport,
 } from '../utils/salesSummaryWorkbook'
 
-/** Column D wording, matching the report template ('khqr' prints as 'QR'). */
+/** Column D wording. A manual KHQR row prints the bank the customer used, e.g.
+ * "KHQR — ABA", so the export is attributable per bank instead of a generic "QR". */
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: 'Cash',
-  khqr: 'QR',
+  khqr: 'KHQR',
   cod: 'COD',
 }
 
-/** Row order inside an item block; anything unmapped follows, alphabetically. */
-const PAYMENT_METHOD_ORDER = ['Cash', 'QR', 'COD']
-
-const paymentMethodLabel = (method?: string | null) => {
+// Column D label for an order: cash/cod stay as-is; a KHQR order appends its bank
+// name when one was recorded (older rows with no bank fall back to plain "KHQR").
+const paymentMethodLabel = (method?: string | null, bankName?: string | null) => {
   const key = (method ?? '').trim().toLowerCase()
   if (!key) return 'Unknown'
-  return PAYMENT_METHOD_LABELS[key] ?? key.toUpperCase()
+  const base = PAYMENT_METHOD_LABELS[key] ?? key.toUpperCase()
+  if (key === 'khqr') {
+    const bank = (bankName ?? '').trim()
+    return bank ? `${base} — ${bank}` : base
+  }
+  return base
+}
+
+// Row order inside an item block: Cash first, then every KHQR (bank) row, then COD;
+// anything else follows. KHQR labels vary by bank, so rank on the prefix.
+const methodRank = (method: string) => {
+  const label = method.trim().toLowerCase()
+  if (label === 'cash') return 0
+  if (label.startsWith('khqr')) return 1
+  if (label === 'cod') return 2
+  return 3
 }
 
 /** The order fields this aggregation needs — a subset of the Prisma row. */
@@ -46,6 +61,8 @@ export interface ExportableOrderItem {
 export interface ExportableOrder {
   createdAt: Date
   paymentMethod: string
+  /** Bank recorded for a manual KHQR payment (null for cash/older orders). */
+  bankName?: string | null
   discountAmount: unknown
   items: ExportableOrderItem[]
 }
@@ -160,7 +177,7 @@ export const buildSalesSummaryReport = (
       .filter((line): line is ReportableLine => line !== null)
     if (lines.length === 0) continue
 
-    const method = paymentMethodLabel(order.paymentMethod)
+    const method = paymentMethodLabel(order.paymentMethod, order.bankName)
     const shares = allocateOrderDiscount(lines, Math.max(0, Number(order.discountAmount) || 0))
 
     let items = dayBuckets.get(day)
@@ -187,11 +204,6 @@ export const buildSalesSummaryReport = (
 
       netByItem.set(key, round2((netByItem.get(key) ?? 0) + (line.gross - discounts)))
     })
-  }
-
-  const methodRank = (method: string) => {
-    const index = PAYMENT_METHOD_ORDER.indexOf(method)
-    return index === -1 ? PAYMENT_METHOD_ORDER.length : index
   }
 
   const totals = { quantity: 0, gross: 0, discounts: 0, net: 0 }
