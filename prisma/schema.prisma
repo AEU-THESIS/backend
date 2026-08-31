@@ -27,6 +27,14 @@ enum OptionSetType {
   custom
 }
 
+// Distinguishes categories used for the product/menu catalog (visible on POS
+// and the customer self-service menu) from categories used only to group
+// inventory supplies.
+enum CategoryType {
+  product
+  inventory
+}
+
 // Money/fulfillment lifecycle states. Kept as DB enums so an invalid status can
 // never be written (the app is the only writer, but the DB is the last guard).
 enum OrderPaymentStatus {
@@ -207,12 +215,13 @@ model BlacklistedToken {
 // REUSABLE CATALOG OPTIONS (Templates)
 // ==========================================
 model Category {
-  id        Int      @id @default(autoincrement())
-  shopId    Int      @map("shop_id")
+  id        Int          @id @default(autoincrement())
+  shopId    Int          @map("shop_id")
   name      String
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
+  type      CategoryType @default(product)
+  isActive  Boolean      @default(true) @map("is_active")
+  sortOrder Int          @default(0) @map("sort_order")
+  createdAt DateTime     @default(now()) @map("created_at")
 
   shop        Shop                @relation(fields: [shopId], references: [id])
   products    Product[]

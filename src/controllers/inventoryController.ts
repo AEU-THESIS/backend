@@ -10,16 +10,33 @@ import { idParamSchema } from '../validations/commonValidation'
 import {
   adjustInventoryItemSchema,
   createInventoryItemSchema,
+  inventoryExpenseReportExportQuerySchema,
+  inventoryExpenseReportQuerySchema,
+  inventoryHistoryExportQuerySchema,
   inventoryHistoryQuerySchema,
   inventoryQuerySchema,
   updateInventoryItemSchema,
 } from '../validations/inventoryValidation'
 import { inventoryService } from '../services/inventoryService'
+import { inventoryExportService } from '../services/inventoryExportService'
+import type { ExportedWorkbook } from '../services/inventoryExportService'
 import { processImage } from '../utils/fileUpload'
 
 const getUploadedImageUrl = async (req: Request) => {
   if (!req.file) return undefined
   return processImage(req.file.buffer)
+}
+
+const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+/** Streams a generated workbook back as a file attachment. */
+const sendWorkbook = (res: Response, workbook: ExportedWorkbook) => {
+  res.setHeader('Content-Type', XLSX_CONTENT_TYPE)
+  res.setHeader('Content-Disposition', `attachment; filename="${workbook.fileName}"`)
+  // The filename is the payload's identity, so let the browser read it back.
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition')
+  res.setHeader('Content-Length', workbook.buffer.length)
+  return res.status(HttpStatus.OK).send(workbook.buffer)
 }
 
 export const inventoryController = {
@@ -67,5 +84,26 @@ export const inventoryController = {
     const query = inventoryHistoryQuerySchema.parse(req.query)
     const history = await inventoryService.getHistory(id, req.user!.shop_id, query)
     return sendSuccess(res, history)
+  }),
+
+  getExpenseReport: catchAsync(async (req: Request, res: Response) => {
+    const query = inventoryExpenseReportQuerySchema.parse(req.query)
+    const report = await inventoryService.getExpenseReport(req.user!.shop_id, query)
+    return sendSuccess(res, report)
+  }),
+
+  /** Streams the Expense Report workbook for the selected range as .xlsx bytes. */
+  exportExpenseReport: catchAsync(async (req: Request, res: Response) => {
+    const query = inventoryExpenseReportExportQuerySchema.parse(req.query)
+    const workbook = await inventoryExportService.getExpenseReportWorkbook(req.user!.shop_id, query)
+    return sendWorkbook(res, workbook)
+  }),
+
+  /** Streams one item's Stock History workbook for the selected range as .xlsx bytes. */
+  exportHistory: catchAsync(async (req: Request, res: Response) => {
+    const { id } = idParamSchema.parse(req.params)
+    const query = inventoryHistoryExportQuerySchema.parse(req.query)
+    const workbook = await inventoryExportService.getHistoryWorkbook(id, req.user!.shop_id, query)
+    return sendWorkbook(res, workbook)
   }),
 }

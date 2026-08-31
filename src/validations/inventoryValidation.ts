@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { EXPORT_LOCALES } from '../constants/inventoryExportLabels'
 
 // The DB columns are fixed-scale: quantities are DECIMAL(10,2) and costs are
 // DECIMAL(12,4). Anything finer is silently rounded on write, so a payload that
@@ -162,8 +163,80 @@ export const inventoryHistoryQuerySchema = z
   .strictObject({
     from: isoDateTime.optional(),
     to: isoDateTime.optional(),
+    // Restrict to stock-ins only, removals only, or omit for both.
+    type: z.enum(['add', 'remove']).optional(),
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(10),
+  })
+  .superRefine((data, ctx) => {
+    if (data.from && data.to && Date.parse(data.from) > Date.parse(data.to)) {
+      ;(['from', 'to'] as const).forEach(path => {
+        ctx.addIssue({
+          code: 'custom',
+          path: [path],
+          message: 'from must be earlier than or equal to to',
+        })
+      })
+    }
+  })
+
+// Expense report is filtered by an explicit date range and grouped either by
+// day (for the spend-over-time chart) or by ingredient (for the breakdown
+// table). The two groupings are fetched as separate requests rather than one
+// combined payload, so each stays a simple, independently-cacheable query.
+export const inventoryExpenseReportQuerySchema = z
+  .strictObject({
+    startDate: isoDateTime,
+    endDate: isoDateTime,
+    // 'raw' returns individual purchase records (unaggregated) — what the Excel
+    // export reads, needing per-transaction rows rather than totals.
+    groupBy: z.enum(['day', 'ingredient', 'raw']).default('day'),
+  })
+  .superRefine((data, ctx) => {
+    if (Date.parse(data.startDate) > Date.parse(data.endDate)) {
+      ;(['startDate', 'endDate'] as const).forEach(path => {
+        ctx.addIssue({
+          code: 'custom',
+          path: [path],
+          message: 'startDate must be earlier than or equal to endDate',
+        })
+      })
+    }
+  })
+
+// The Excel exports are rendered server-side, so the caller passes the UI
+// language it wants the workbook written in. Defaults to English, matching the
+// client's own i18n fallback.
+const exportLocale = z.enum(EXPORT_LOCALES).default('en')
+
+// Same range as the on-screen expense report — the export covers whatever the
+// user is looking at, so it reuses the report's own date validation.
+export const inventoryExpenseReportExportQuerySchema = z
+  .strictObject({
+    startDate: isoDateTime,
+    endDate: isoDateTime,
+    locale: exportLocale,
+  })
+  .superRefine((data, ctx) => {
+    if (Date.parse(data.startDate) > Date.parse(data.endDate)) {
+      ;(['startDate', 'endDate'] as const).forEach(path => {
+        ctx.addIssue({
+          code: 'custom',
+          path: [path],
+          message: 'startDate must be earlier than or equal to endDate',
+        })
+      })
+    }
+  })
+
+// Mirrors the history query minus pagination: an export always covers the whole
+// filtered range rather than one page of it.
+export const inventoryHistoryExportQuerySchema = z
+  .strictObject({
+    from: isoDateTime.optional(),
+    to: isoDateTime.optional(),
+    type: z.enum(['add', 'remove']).optional(),
+    locale: exportLocale,
   })
   .superRefine((data, ctx) => {
     if (data.from && data.to && Date.parse(data.from) > Date.parse(data.to)) {
@@ -182,3 +255,8 @@ export type UpdateInventoryItemInput = z.infer<typeof updateInventoryItemSchema>
 export type AdjustInventoryItemInput = z.infer<typeof adjustInventoryItemSchema>
 export type InventoryQueryInput = z.infer<typeof inventoryQuerySchema>
 export type InventoryHistoryQueryInput = z.infer<typeof inventoryHistoryQuerySchema>
+export type InventoryExpenseReportQueryInput = z.infer<typeof inventoryExpenseReportQuerySchema>
+export type InventoryExpenseReportExportQueryInput = z.infer<
+  typeof inventoryExpenseReportExportQuerySchema
+>
+export type InventoryHistoryExportQueryInput = z.infer<typeof inventoryHistoryExportQuerySchema>

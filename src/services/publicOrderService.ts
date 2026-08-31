@@ -50,7 +50,7 @@ export const publicOrderService = {
 
     const [categories, products, promotions] = await Promise.all([
       prisma.category.findMany({
-        where: { shopId: shop.id, isActive: true },
+        where: { shopId: shop.id, isActive: true, type: 'product' },
         orderBy: { sortOrder: 'asc' },
         select: { id: true, name: true, sortOrder: true },
       }),

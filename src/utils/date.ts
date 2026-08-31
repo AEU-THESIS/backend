@@ -269,6 +269,16 @@ export function toShopDateString(date: Date): string {
 }
 
 /**
+ * Shifts a UTC instant so that reading it with `timeZone: 'UTC'` yields the
+ * shop's own wall clock. Lets `Intl.DateTimeFormat` render a timestamp in the
+ * café's local time without needing an IANA zone name for the configured
+ * offset.
+ */
+export function toShopWallClock(date: Date): Date {
+  return new Date(date.getTime() + SHOP_UTC_OFFSET_MINUTES * 60_000)
+}
+
+/**
  * Calculates the start date based on the specified period.
  */
 export function getPeriodStartDate(period: 'daily' | 'weekly' | 'monthly'): Date {
