@@ -192,7 +192,8 @@ export const buildSalesSummaryWorkbook = (
     cell.font = FONT_HEADER
     cell.fill = FILL_HEADER
     cell.border = BORDER_BOXED
-    cell.alignment = { horizontal: 'center', vertical: 'middle' }
+    // Payment method (column D) is left-aligned to match its left-aligned data.
+    cell.alignment = { horizontal: index === 3 ? 'left' : 'center', vertical: 'middle' }
   })
 
   // ── One block per day ─────────────────────────────────────────────────────
@@ -226,8 +227,9 @@ export const buildSalesSummaryWorkbook = (
         const method = row.getCell(4)
         method.value = paymentRow.paymentMethod
         method.border = rowBorder
-        method.alignment = { horizontal: 'center' }
-        // Plain text, no chip fill — the payment method column is left uncoloured.
+        // Left-aligned plain text (no chip fill) so the column reads from the start,
+        // like the Item column.
+        method.alignment = { horizontal: 'left' }
         method.font = FONT_ITEM
 
         const quantity = row.getCell(5)
