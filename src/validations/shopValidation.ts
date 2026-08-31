@@ -13,10 +13,9 @@ const bankListSchema = z
     const result: string[] = []
     for (const bank of list) {
       const key = bank.toLowerCase()
-      if (!seen.has(key)) {
-        seen.add(key)
-        result.push(bank)
-      }
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(bank)
     }
     return result
   })

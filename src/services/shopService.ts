@@ -1,6 +1,6 @@
 import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import { ROLES } from '../constants/roles'
-import { DEFAULT_PAYMENT_BANKS } from '../constants/paymentBanks'
+import { normalizePaymentBanks } from '../constants/paymentBanks'
 import type { CreateShopInput, UpdateShopSettingsInput } from '../validations/shopValidation'
 
 const shopSettingsSelect = {
@@ -20,19 +20,6 @@ const shopSettingsSelect = {
   createdAt: true,
   updatedAt: true,
 } as const
-
-// The `payment_banks` column is JSON and may be null (never configured) or an empty
-// array (admin removed them all). The POS bank selector needs at least one option, so
-// normalise to a clean list of non-empty strings and fall back to the default (ABA)
-// whenever nothing usable is stored.
-function normalizePaymentBanks(value: unknown): string[] {
-  const list = Array.isArray(value)
-    ? value
-        .filter((b): b is string => typeof b === 'string' && b.trim().length > 0)
-        .map(b => b.trim())
-    : []
-  return list.length > 0 ? list : [...DEFAULT_PAYMENT_BANKS]
-}
 
 export const shopService = {
   async create(data: CreateShopInput) {

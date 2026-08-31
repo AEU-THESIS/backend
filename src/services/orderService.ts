@@ -13,6 +13,7 @@ import {
 } from '../utils/promotionDiscount'
 import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
 import { round2, roundRielUp, roundRielDown } from '../utils/money'
+import { normalizePaymentBanks } from '../constants/paymentBanks'
 import { ROLES } from '../constants/roles'
 
 /**
@@ -477,11 +478,26 @@ export const orderService = {
     // configured rate and a customer can never underpay with a forged rate.
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
-      select: { exchangeRate: true, isOrderManagementEnabled: true },
+      select: { exchangeRate: true, isOrderManagementEnabled: true, paymentBanks: true },
     })
 
     if (!shop) {
       throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    // A manual KHQR bank must be one the shop actually configured — never trust the
+    // client's value, so a forged or stale request can't attribute a sale to an
+    // arbitrary bank and pollute the reports. Match case-insensitively and persist the
+    // shop's canonical spelling.
+    let resolvedBankName = bankName
+    if (paymentMethod === 'khqr') {
+      const configuredBanks = normalizePaymentBanks(shop.paymentBanks)
+      const target = (bankName ?? '').trim().toLowerCase()
+      const match = configuredBanks.find(b => b.toLowerCase() === target)
+      if (!match) {
+        throw new AppError(Messages.INVALID_PAYMENT_BANK, HttpStatus.BAD_REQUEST)
+      }
+      resolvedBankName = match
     }
 
     const exchangeRate = Number(shop.exchangeRate)
@@ -568,7 +584,7 @@ export const orderService = {
             // exactly even if the shop later changes its exchange rate.
             exchangeRateSnapshot: exchangeRate,
             paymentMethod,
-            bankName,
+            bankName: resolvedBankName,
             // A fully-comp order is `comp` (excluded from paid-only sales queries);
             // otherwise it is a normal paid sale — a mixed order (paid + comp lines)
             // still charges for the paid items and stays `paid`.
