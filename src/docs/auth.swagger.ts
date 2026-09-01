@@ -129,6 +129,8 @@
  *         description: Unauthorized
  *       403:
  *         description: Account deactivated
+ *       404:
+ *         description: User not found (missing or soft-deleted)
  */
 
 /**

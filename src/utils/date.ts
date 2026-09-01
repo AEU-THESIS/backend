@@ -150,42 +150,46 @@ export function buildRangeBuckets(
   // Work entirely in the shop's wall clock: shifting an instant by the shop
   // offset lets the UTC getters read the shop's local Y/M/D/H, so buckets and
   // the labels on them line up with the shop's calendar (not the server's).
-  const s = toShopWallClock(start)
-  const e = toShopWallClock(end)
-  const startOfDayMs = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-  const spanDays = (e.getTime() - s.getTime()) / dayMs
+  const shopStart = toShopWallClock(start)
+  const shopEnd = toShopWallClock(end)
+  const startOfDayMs = (moment: Date) =>
+    Date.UTC(moment.getUTCFullYear(), moment.getUTCMonth(), moment.getUTCDate())
+  const spanDays = (shopEnd.getTime() - shopStart.getTime()) / dayMs
 
   if (spanDays <= 1.5) {
-    const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`
-    const points = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: 0 }))
-    return { points, bucketIndex: d => toShopWallClock(d).getUTCHours() }
+    const hourLabel = (hour: number) =>
+      `${hour % 12 === 0 ? 12 : hour % 12}${hour < 12 ? 'a' : 'p'}`
+    const points = Array.from({ length: 24 }, (_, hour) => ({ label: hourLabel(hour), value: 0 }))
+    return { points, bucketIndex: order => toShopWallClock(order).getUTCHours() }
   }
 
   if (spanDays <= 31) {
-    const s0 = startOfDayMs(s)
-    const days = Math.floor((startOfDayMs(e) - s0) / dayMs) + 1
-    const points = Array.from({ length: days }, (_, i) => {
-      const d = new Date(s0 + i * dayMs)
-      return { label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 }
+    const bucketStartMs = startOfDayMs(shopStart)
+    const days = Math.floor((startOfDayMs(shopEnd) - bucketStartMs) / dayMs) + 1
+    const points = Array.from({ length: days }, (_, index) => {
+      const day = new Date(bucketStartMs + index * dayMs)
+      return { label: `${day.getUTCMonth() + 1}/${day.getUTCDate()}`, value: 0 }
     })
     return {
       points,
-      bucketIndex: d => Math.floor((startOfDayMs(toShopWallClock(d)) - s0) / dayMs),
+      bucketIndex: order =>
+        Math.floor((startOfDayMs(toShopWallClock(order)) - bucketStartMs) / dayMs),
     }
   }
 
   if (spanDays <= 92) {
     // Monday-aligned weeks.
-    const mondayOffset = (new Date(startOfDayMs(s)).getUTCDay() + 6) % 7
-    const s0 = startOfDayMs(s) - mondayOffset * dayMs
-    const weeks = Math.floor((startOfDayMs(e) - s0) / (dayMs * 7)) + 1
-    const points = Array.from({ length: weeks }, (_, i) => {
-      const d = new Date(s0 + i * 7 * dayMs)
-      return { label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`, value: 0 }
+    const mondayOffset = (new Date(startOfDayMs(shopStart)).getUTCDay() + 6) % 7
+    const bucketStartMs = startOfDayMs(shopStart) - mondayOffset * dayMs
+    const weeks = Math.floor((startOfDayMs(shopEnd) - bucketStartMs) / (dayMs * 7)) + 1
+    const points = Array.from({ length: weeks }, (_, index) => {
+      const weekStart = new Date(bucketStartMs + index * 7 * dayMs)
+      return { label: `${weekStart.getUTCMonth() + 1}/${weekStart.getUTCDate()}`, value: 0 }
     })
     return {
       points,
-      bucketIndex: d => Math.floor((startOfDayMs(toShopWallClock(d)) - s0) / (dayMs * 7)),
+      bucketIndex: order =>
+        Math.floor((startOfDayMs(toShopWallClock(order)) - bucketStartMs) / (dayMs * 7)),
     }
   }
 
@@ -204,27 +208,37 @@ export function buildRangeBuckets(
     'Dec',
   ]
   if (spanDays <= 366) {
-    const count =
-      (e.getUTCFullYear() - s.getUTCFullYear()) * 12 + (e.getUTCMonth() - s.getUTCMonth()) + 1
-    const points = Array.from({ length: count }, (_, i) => {
-      const d = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + i, 1))
-      return { label: months[d.getUTCMonth()], value: 0 }
+    const monthCount =
+      (shopEnd.getUTCFullYear() - shopStart.getUTCFullYear()) * 12 +
+      (shopEnd.getUTCMonth() - shopStart.getUTCMonth()) +
+      1
+    const points = Array.from({ length: monthCount }, (_, index) => {
+      const month = new Date(
+        Date.UTC(shopStart.getUTCFullYear(), shopStart.getUTCMonth() + index, 1)
+      )
+      return { label: months[month.getUTCMonth()], value: 0 }
     })
     return {
       points,
-      bucketIndex: d => {
-        const w = toShopWallClock(d)
-        return (w.getUTCFullYear() - s.getUTCFullYear()) * 12 + (w.getUTCMonth() - s.getUTCMonth())
+      bucketIndex: order => {
+        const shopMoment = toShopWallClock(order)
+        return (
+          (shopMoment.getUTCFullYear() - shopStart.getUTCFullYear()) * 12 +
+          (shopMoment.getUTCMonth() - shopStart.getUTCMonth())
+        )
       },
     }
   }
 
-  const yearCount = e.getUTCFullYear() - s.getUTCFullYear() + 1
-  const points = Array.from({ length: yearCount }, (_, i) => ({
-    label: String(s.getUTCFullYear() + i),
+  const yearCount = shopEnd.getUTCFullYear() - shopStart.getUTCFullYear() + 1
+  const points = Array.from({ length: yearCount }, (_, index) => ({
+    label: String(shopStart.getUTCFullYear() + index),
     value: 0,
   }))
-  return { points, bucketIndex: d => toShopWallClock(d).getUTCFullYear() - s.getUTCFullYear() }
+  return {
+    points,
+    bucketIndex: order => toShopWallClock(order).getUTCFullYear() - shopStart.getUTCFullYear(),
+  }
 }
 
 /**
@@ -235,8 +249,11 @@ export function buildRangeBuckets(
  * via env for other deployments.
  */
 // Use the configured offset when it's a valid number (including 0 for UTC);
-// only fall back to UTC+7 when it's unset or non-numeric.
-const configuredOffset = Number(process.env.SHOP_UTC_OFFSET_MINUTES)
+// fall back to UTC+7 when it's unset, empty, or non-numeric. An empty env var
+// (`SHOP_UTC_OFFSET_MINUTES=`) must NOT be read as 0 — Number('') is 0 — or the
+// server would silently switch to UTC while the client stays on UTC+7.
+const rawOffset = process.env.SHOP_UTC_OFFSET_MINUTES?.trim()
+const configuredOffset = rawOffset ? Number(rawOffset) : NaN
 const SHOP_UTC_OFFSET_MINUTES = Number.isFinite(configuredOffset) ? configuredOffset : 420 // UTC+7
 
 /**
@@ -362,11 +379,11 @@ export function getPeriodStartDate(period: 'daily' | 'weekly' | 'monthly'): Date
 
   if (period === 'monthly') {
     const { year, month, day } = shopNowParts()
-    const idx = year * 12 + (month - 1) - 1 // previous month
-    const py = Math.floor(idx / 12)
-    const pm = (idx % 12) + 1
-    const clampedDay = Math.min(day, daysInMonth(py, pm))
-    const dateStr = `${py}-${String(pm).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`
+    const previousMonthIndex = year * 12 + (month - 1) - 1
+    const previousYear = Math.floor(previousMonthIndex / 12)
+    const previousMonth = (previousMonthIndex % 12) + 1
+    const clampedDay = Math.min(day, daysInMonth(previousYear, previousMonth))
+    const dateStr = `${previousYear}-${String(previousMonth).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`
     return shopDayStartUtc(dateStr)
   }
 
