@@ -24,6 +24,43 @@ const soldOrderWhere: Prisma.OrderWhereInput = {
   fulfillmentStatus: { not: 'canceled' },
 }
 
+/**
+ * Item and category revenue must reconcile with Net Sales, which sums
+ * `Order.totalAmount` — an after-discount figure. A line's own `subtotal` is a
+ * gross, pre-discount amount, so summing subtotals overstates revenue by every
+ * order's discount (AT-93). We close the gap by apportioning each order's net
+ * total across its surviving lines in proportion to their gross subtotal:
+ *
+ *   lineNetRevenue = subtotal × (order.totalAmount ÷ order's surviving gross)
+ *
+ * Because `totalAmount` is itself `Σ subtotals − discount` (recomputed over the
+ * surviving lines on cancellation), the per-order shares sum back to
+ * `totalAmount` exactly — so period revenue sums to Net Sales regardless of how
+ * the discount was distributed, and even when a large fixed discount clamped
+ * the order's net to 0. `items` must be the same `canceledAt: null` lines the
+ * reports aggregate, each carrying its parent order's id (`orderId`) and
+ * `totalAmount`.
+ */
+function apportionNetRevenue<
+  T extends { orderId: number; subtotal: Prisma.Decimal; order: { totalAmount: Prisma.Decimal } },
+>(items: T[]): Map<T, number> {
+  // Surviving (report-visible) gross subtotal per order.
+  const grossByOrder = new Map<number, number>()
+  for (const item of items) {
+    grossByOrder.set(item.orderId, (grossByOrder.get(item.orderId) ?? 0) + Number(item.subtotal))
+  }
+
+  const netByLine = new Map<T, number>()
+  for (const item of items) {
+    const gross = grossByOrder.get(item.orderId) ?? 0
+    // gross === 0 only when every surviving line is complimentary (subtotal 0),
+    // in which case the order's net is 0 too — nothing to apportion, avoid ÷0.
+    const net = gross > 0 ? (Number(item.subtotal) * Number(item.order.totalAmount)) / gross : 0
+    netByLine.set(item, net)
+  }
+  return netByLine
+}
+
 export const reportService = {
   /**
    * Cash/KHQR breakdown for one day, or for the inclusive window
@@ -142,6 +179,7 @@ export const reportService = {
         },
       },
       include: {
+        order: { select: { totalAmount: true } },
         product: {
           select: {
             name: true,
@@ -150,6 +188,10 @@ export const reportService = {
         },
       },
     })
+
+    // Revenue is the after-discount share of each line (see apportionNetRevenue),
+    // so item revenue reconciles with Net Sales rather than the gross subtotal.
+    const netRevenue = apportionNetRevenue(orderItems)
 
     // Aggregate quantity/revenue per product in JS to stay database-dialect independent.
     const aggregation: Record<
@@ -169,7 +211,7 @@ export const reportService = {
         }
       }
       aggregation[pid].quantity += item.quantity
-      aggregation[pid].revenue += Number(item.subtotal)
+      aggregation[pid].revenue += netRevenue.get(item) ?? 0
     })
 
     const productList = Object.values(aggregation).map(p => ({
@@ -357,11 +399,15 @@ export const reportService = {
         },
       },
       include: {
+        order: { select: { totalAmount: true } },
         product: {
           select: { name: true, price: true },
         },
       },
     })
+
+    // After-discount revenue share per line, so item revenue reconciles with Net Sales.
+    const netRevenue = apportionNetRevenue(orderItems)
 
     // Aggregate quantities and revenues by product in JavaScript to remain database-dialect independent
     const aggregation: Record<number, { name: string; quantity: number; revenue: number }> = {}
@@ -369,7 +415,6 @@ export const reportService = {
     orderItems.forEach(item => {
       const pid = item.productId
       const qty = item.quantity
-      const subtotal = Number(item.subtotal)
 
       if (!aggregation[pid]) {
         aggregation[pid] = {
@@ -379,7 +424,7 @@ export const reportService = {
         }
       }
       aggregation[pid].quantity += qty
-      aggregation[pid].revenue += subtotal
+      aggregation[pid].revenue += netRevenue.get(item) ?? 0
     })
 
     const productList = Object.values(aggregation)
@@ -409,6 +454,7 @@ export const reportService = {
         },
       },
       include: {
+        order: { select: { totalAmount: true } },
         product: {
           include: {
             category: { select: { name: true } },
@@ -417,12 +463,14 @@ export const reportService = {
       },
     })
 
+    // After-discount revenue share per line, so category revenue reconciles with Net Sales.
+    const netRevenue = apportionNetRevenue(orderItems)
+
     const aggregation: Record<string, { category: string; quantity: number; revenue: number }> = {}
 
     orderItems.forEach(item => {
       const catName = item.product?.category?.name || 'Uncategorized'
       const qty = item.quantity
-      const subtotal = Number(item.subtotal)
 
       if (!aggregation[catName]) {
         aggregation[catName] = {
@@ -432,7 +480,7 @@ export const reportService = {
         }
       }
       aggregation[catName].quantity += qty
-      aggregation[catName].revenue += subtotal
+      aggregation[catName].revenue += netRevenue.get(item) ?? 0
     })
 
     return Object.values(aggregation)
