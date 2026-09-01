@@ -76,6 +76,65 @@
 
 /**
  * @openapi
+ * /api/auth/me:
+ *   get:
+ *     tags:
+ *       - Auth
+ *     summary: Get the signed-in user
+ *     description: >
+ *       Returns the live user record for the authenticated caller, read fresh
+ *       from the database. Lets the client refresh a changed role or a
+ *       deactivation without signing out. The role in the browser is a cache
+ *       only — every request is still authorized server-side.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user_id:
+ *                       type: integer
+ *                       example: 1
+ *                     name:
+ *                       type: string
+ *                       example: Sok Dara
+ *                     email:
+ *                       type: string
+ *                       format: email
+ *                       example: admin@routincafe.com
+ *                     shop_id:
+ *                       type: integer
+ *                       example: 1
+ *                     role:
+ *                       type: string
+ *                       nullable: true
+ *                       example: Admin
+ *                     image_url:
+ *                       type: string
+ *                       nullable: true
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Account deactivated
+ *       404:
+ *         description: User not found (missing or soft-deleted)
+ */
+
+/**
+ * @openapi
  * /api/auth/password-resets:
  *   post:
  *     tags:

@@ -20,6 +20,17 @@ const hashToken = (token: string): string => {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
 
+// The role_user join has no priority column, so a user with more than one role
+// must be read in a stable order — otherwise their effective role flips between
+// requests. Always order by role id and take the first. See AT-74.
+const rolesOrdered = {
+  orderBy: { roleId: 'asc' as const },
+  include: { role: true },
+}
+
+const resolvePrimaryRole = (roles: { role: { name: string } }[]): string | null =>
+  roles[0]?.role.name ?? null
+
 export const authService = {
   async login(data: LoginInput) {
     const users = await prisma.user.findMany({
@@ -28,9 +39,7 @@ export const authService = {
         isDeleted: false,
       },
       include: {
-        roles: {
-          include: { role: true },
-        },
+        roles: rolesOrdered,
       },
     })
 
@@ -55,7 +64,7 @@ export const authService = {
       throw new AppError(Messages.INVALID_CREDENTIALS, HttpStatus.UNAUTHORIZED)
     }
 
-    const role = user.roles[0]?.role.name || null
+    const role = resolvePrimaryRole(user.roles)
 
     const token = jwt.sign(
       {
@@ -218,9 +227,7 @@ export const authService = {
       where: { id: userId, deletedAt: null },
       select: {
         isActive: true,
-        roles: {
-          include: { role: true },
-        },
+        roles: rolesOrdered,
       },
     })
 
@@ -232,6 +239,38 @@ export const authService = {
       throw new AppError(Messages.ACCOUNT_DEACTIVATED, HttpStatus.FORBIDDEN)
     }
 
-    return user.roles[0]?.role.name || null
+    return resolvePrimaryRole(user.roles)
+  },
+
+  /**
+   * Returns the live user record for the currently authenticated caller.
+   * Backs `GET /auth/me` so the client can refresh its cached role/permissions
+   * without signing out. Applies the same active-account guard the auth
+   * middleware runs on every request. See AT-74.
+   */
+  async getMe(userId: number) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+      include: {
+        roles: rolesOrdered,
+      },
+    })
+
+    if (!user) {
+      throw new AppError(Messages.USER_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    if (!user.isActive) {
+      throw new AppError(Messages.ACCOUNT_DEACTIVATED, HttpStatus.FORBIDDEN)
+    }
+
+    return {
+      user_id: user.id,
+      name: user.name,
+      email: user.email,
+      shop_id: user.shopId,
+      role: resolvePrimaryRole(user.roles),
+      image_url: user.imageUrl,
+    }
   },
 }

@@ -10,6 +10,7 @@ import {
   shopDayStartUtc,
   shopDayEndUtc,
   shopDateString,
+  toShopWallClock,
 } from '../utils/date'
 import { buildSalesSummaryReport } from './salesSummaryExport'
 import { renderSalesSummaryWorkbook, salesSummaryFileName } from '../utils/salesSummaryWorkbook'
@@ -276,23 +277,23 @@ export const reportService = {
       return { granularity, points }
     }
 
+    // Preset windows are anchored to the shop's local calendar, and stored
+    // timestamps are bucketed by their shop-local wall clock — so an order taken
+    // late in the shop's evening lands in the right day/month/year, not the
+    // server's.
     const now = new Date()
+    const shopNow = toShopWallClock(now)
     let start: Date
-    const points: { label: string; value: number }[] = []
+    let points: { label: string; value: number }[]
     let bucketIndex: (d: Date) => number
 
     if (granularity === 'weekly') {
-      const monday = new Date(now)
-      const mondayOffset = (monday.getDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
-      monday.setDate(monday.getDate() - mondayOffset)
-      monday.setHours(0, 0, 0, 0)
-      start = monday
-      ;['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(label =>
-        points.push({ label, value: 0 })
-      )
-      bucketIndex = d => (d.getDay() + 6) % 7
+      const mondayOffset = (shopNow.getUTCDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
+      start = shopDayStartUtc(shopDateString(-mondayOffset))
+      points = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(label => ({ label, value: 0 }))
+      bucketIndex = d => (toShopWallClock(d).getUTCDay() + 6) % 7
     } else if (granularity === 'monthly') {
-      start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0)
+      start = shopDayStartUtc(`${shopNow.getUTCFullYear()}-01-01`)
       const months = [
         'Jan',
         'Feb',
@@ -307,15 +308,16 @@ export const reportService = {
         'Nov',
         'Dec',
       ]
-      months.forEach(label => points.push({ label, value: 0 }))
-      bucketIndex = d => d.getMonth()
+      points = months.map(label => ({ label, value: 0 }))
+      bucketIndex = d => toShopWallClock(d).getUTCMonth()
     } else {
-      const startYear = now.getFullYear() - 4
-      start = new Date(startYear, 0, 1, 0, 0, 0, 0)
-      for (let y = startYear; y <= now.getFullYear(); y++) {
-        points.push({ label: String(y), value: 0 })
-      }
-      bucketIndex = d => d.getFullYear() - startYear
+      const startYear = shopNow.getUTCFullYear() - 4
+      start = shopDayStartUtc(`${startYear}-01-01`)
+      points = Array.from({ length: shopNow.getUTCFullYear() - startYear + 1 }, (_, i) => ({
+        label: String(startYear + i),
+        value: 0,
+      }))
+      bucketIndex = d => toShopWallClock(d).getUTCFullYear() - startYear
     }
 
     const orders = await prisma.order.findMany({
@@ -328,16 +330,16 @@ export const reportService = {
     })
 
     // Accumulate net sales into buckets in JS to stay database-dialect independent.
-    orders.forEach(o => {
+    for (const o of orders) {
       const idx = bucketIndex(o.createdAt)
       if (idx >= 0 && idx < points.length) {
         points[idx].value += Number(o.totalAmount)
       }
-    })
+    }
 
-    points.forEach(p => {
+    for (const p of points) {
       p.value = Math.round(p.value * 100) / 100
-    })
+    }
 
     return { granularity, points }
   },
