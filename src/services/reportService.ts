@@ -38,25 +38,56 @@ const soldOrderWhere: Prisma.OrderWhereInput = {
  * `totalAmount` exactly — so period revenue sums to Net Sales regardless of how
  * the discount was distributed, and even when a large fixed discount clamped
  * the order's net to 0. `items` must be the same `canceledAt: null` lines the
- * reports aggregate, each carrying its parent order's id (`orderId`) and
+ * reports aggregate, each carrying its parent order's id (`id`, `orderId`) and
  * `totalAmount`.
+ *
+ * Shares are computed in integer cents and the leftover cents from flooring are
+ * handed to the largest-remainder lines (stable tiebreak by order-item id), so
+ * each order's lines sum back to its net to the cent — no fractional-cent drift
+ * against Net Sales (AT-93).
  */
 function apportionNetRevenue<
-  T extends { orderId: number; subtotal: Prisma.Decimal; order: { totalAmount: Prisma.Decimal } },
+  T extends {
+    id: number
+    orderId: number
+    subtotal: Prisma.Decimal
+    order: { totalAmount: Prisma.Decimal }
+  },
 >(items: T[]): Map<T, number> {
-  // Surviving (report-visible) gross subtotal per order.
-  const grossByOrder = new Map<number, number>()
+  // Group surviving (report-visible) lines by their parent order.
+  const linesByOrder = new Map<number, T[]>()
   for (const item of items) {
-    grossByOrder.set(item.orderId, (grossByOrder.get(item.orderId) ?? 0) + Number(item.subtotal))
+    const group = linesByOrder.get(item.orderId)
+    if (group) group.push(item)
+    else linesByOrder.set(item.orderId, [item])
   }
 
   const netByLine = new Map<T, number>()
-  for (const item of items) {
-    const gross = grossByOrder.get(item.orderId) ?? 0
+  for (const lines of linesByOrder.values()) {
+    const gross = lines.reduce((sum, l) => sum + Number(l.subtotal), 0)
+    const netCents = Math.round(Number(lines[0].order.totalAmount) * 100)
+
     // gross === 0 only when every surviving line is complimentary (subtotal 0),
     // in which case the order's net is 0 too — nothing to apportion, avoid ÷0.
-    const net = gross > 0 ? (Number(item.subtotal) * Number(item.order.totalAmount)) / gross : 0
-    netByLine.set(item, net)
+    if (gross <= 0) {
+      for (const line of lines) netByLine.set(line, 0)
+      continue
+    }
+
+    // Floor each line's cent share, then distribute the leftover cents to the
+    // lines with the largest fractional remainder so the shares sum to netCents.
+    const shares = lines.map(line => {
+      const exact = (Number(line.subtotal) * netCents) / gross
+      const floor = Math.floor(exact)
+      return { line, floor, remainder: exact - floor }
+    })
+    let residual = netCents - shares.reduce((sum, s) => sum + s.floor, 0)
+    shares.sort((a, b) => b.remainder - a.remainder || a.line.id - b.line.id)
+    for (const s of shares) {
+      const cents = s.floor + (residual > 0 ? 1 : 0)
+      if (residual > 0) residual--
+      netByLine.set(s.line, cents / 100)
+    }
   }
   return netByLine
 }
