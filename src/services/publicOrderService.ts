@@ -19,6 +19,8 @@ export const publicOrderService = {
         slug: true,
         currencySymbol: true,
         isShopClosed: true,
+        closureMessage: true,
+        closureDescription: true,
       },
     })
     if (!shop) {
@@ -35,7 +37,15 @@ export const publicOrderService = {
   async getMenu(
     target:
       | string
-      | { id: number; name: string; slug: string; currencySymbol: string; isShopClosed: boolean }
+      | {
+          id: number
+          name: string
+          slug: string
+          currencySymbol: string
+          isShopClosed: boolean
+          closureMessage: string | null
+          closureDescription: string | null
+        }
   ) {
     const shop = typeof target === 'string' ? await this.resolveShopBySlug(target) : target
 

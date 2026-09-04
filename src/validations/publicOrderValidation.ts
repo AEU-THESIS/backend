@@ -38,6 +38,14 @@ export const CreatePreOrderSchema = z.strictObject({
 
 export type CreatePreOrderInput = z.infer<typeof CreatePreOrderSchema>
 
+// Customer language preference set from the Mini App toggle. Mirrors the i18n
+// locale codes; anything else is rejected.
+export const SetLanguageSchema = z.strictObject({
+  language: z.enum(['en', 'kh']),
+})
+
+export type SetLanguageInput = z.infer<typeof SetLanguageSchema>
+
 export const ShopSlugParamsSchema = z.object({
   slug: z
     .string()

@@ -86,6 +86,11 @@ model Shop {
   receiptFooter            String?  @map("receipt_footer") @db.Text
   isOrderManagementEnabled Boolean  @default(true) @map("is_order_management_enabled")
   isShopClosed             Boolean  @default(false) @map("is_shop_closed")
+  // Optional owner-authored closure notice shown in the customer Mini App when the
+  // shop is closed. Free text in any language (Khmer or English); when null/blank the
+  // Mini App falls back to the default localized notice.
+  closureMessage           String?  @map("closure_message") @db.Text
+  closureDescription       String?  @map("closure_description") @db.Text
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
@@ -684,4 +689,25 @@ model BlockedTelegramCustomer {
   @@unique([shopId, telegramUserId])
   @@index([shopId, telegramUserId])
   @@map("blocked_telegram_customers")
+}
+
+// A Telegram customer's profile with the ordering bot. Global (not shop-scoped)
+// because language and contact details belong to the person, not a shop, and the
+// bot's direct-message command handler has no shop context. Powers two things:
+//  - the language the bot talks to this user in (changeable via /language in the
+//    bot, or from the Mini App language toggle);
+//  - remembering the last name/phone the guest used so checkout can pre-fill them.
+model TelegramCustomer {
+  id                Int      @id @default(autoincrement())
+  telegramUserId    String   @unique @map("telegram_user_id")
+  telegramUsername  String?  @map("telegram_username")
+  // 'en' | 'kh' — matches the Mini App i18n locale codes. Defaults to English.
+  languageCode      String   @default("en") @map("language_code")
+  // Last contact details the guest submitted, reused to pre-fill the next order.
+  lastCustomerName  String?  @map("last_customer_name")
+  lastCustomerPhone String?  @map("last_customer_phone")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("telegram_customers")
 }

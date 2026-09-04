@@ -19,6 +19,7 @@ import {
 import { AppError } from '../utils/appError'
 import { orderSseController } from './orderSseController'
 import { telegram, buildCustomerStatusNotification } from '../utils/telegram'
+import { telegramCustomerService } from '../services/telegramCustomerService'
 
 export const orderController = {
   create: catchAsync(async (req: Request, res: Response) => {
@@ -106,7 +107,8 @@ export const orderController = {
 
     // Send direct notification to customer if ordered via Telegram Mini App
     if (updatedOrder.orderType === 'pre_order' && updatedOrder.telegramUserId) {
-      const msg = buildCustomerStatusNotification(updatedOrder, parsed.data.status)
+      const lang = await telegramCustomerService.getLanguage(updatedOrder.telegramUserId)
+      const msg = buildCustomerStatusNotification(updatedOrder, parsed.data.status, undefined, lang)
       if (msg) {
         telegram.notifyCustomer(updatedOrder.telegramUserId, msg).catch(() => {})
       }
@@ -137,7 +139,8 @@ export const orderController = {
     telegram.syncOrderGroupMessage(order).catch(() => {})
 
     if (order.orderType === 'pre_order' && order.telegramUserId) {
-      const msg = buildCustomerStatusNotification(order, 'canceled')
+      const lang = await telegramCustomerService.getLanguage(order.telegramUserId)
+      const msg = buildCustomerStatusNotification(order, 'canceled', undefined, lang)
       if (msg) {
         telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
       }
@@ -165,7 +168,8 @@ export const orderController = {
 
     // Send direct notification to customer if ordered via Telegram Mini App
     if (order.orderType === 'pre_order' && order.telegramUserId) {
-      const msg = buildCustomerStatusNotification(order, 'rejected')
+      const lang = await telegramCustomerService.getLanguage(order.telegramUserId)
+      const msg = buildCustomerStatusNotification(order, 'rejected', undefined, lang)
       if (msg) {
         telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
       }

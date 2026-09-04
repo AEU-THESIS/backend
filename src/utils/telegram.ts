@@ -180,6 +180,17 @@ export const telegram = {
     })
   },
 
+  /** Sends a direct message to a chat (used by the bot command replies). */
+  sendMessage(chatId: string | number, text: string, replyMarkup?: InlineKeyboard) {
+    return callBotApi('sendMessage', {
+      chat_id: chatId,
+      text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    })
+  },
+
   /**
    * Sends a direct status notification to a customer who placed an order via Telegram.
    * If the customer hasn't started the bot or blocked it, catches safely without failing.
@@ -228,40 +239,111 @@ export function escapeHtml(input: string): string {
   return input.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+/** Bot/customer-facing languages, matching the Mini App i18n locale codes. */
+export type CustomerLang = 'en' | 'kh'
+
 /**
- * Builds user-friendly direct notifications sent to the customer on status changes.
+ * Builds user-friendly direct notifications sent to the customer on status changes,
+ * in the customer's saved language (`lang`; defaults to English). The caller looks
+ * up the language via `telegramCustomerService.getLanguage` before calling.
  */
 export function buildCustomerStatusNotification(
   order: any,
   status: string,
-  currencySymbol = '$'
+  currencySymbol = '$',
+  lang: CustomerLang = 'en'
 ): string | null {
   const orderNum = escapeHtml(order.orderNumber ?? '')
   const total = Number(order.totalAmount ?? 0).toFixed(2)
+  const kh = lang === 'kh'
 
   switch (status) {
     case 'preparing':
-      return [
-        `🎉 <b>Your order has been accepted!</b>`,
-        ``,
-        `Order <code>${orderNum}</code> has been accepted by the café and is now being prepared. ☕`,
-        ``,
-        `💵 <b>Total:</b> ${currencySymbol}${total}`,
-        `We'll notify you as soon as your order is ready! ✨`,
-      ].join('\n')
+      return kh
+        ? [
+            `🎉 <b>ការបញ្ជាទិញរបស់អ្នកត្រូវបានទទួលយក!</b>`,
+            ``,
+            `ការបញ្ជាទិញ <code>${orderNum}</code> ត្រូវបានហាងទទួលយក ហើយកំពុងរៀបចំ។ ☕`,
+            ``,
+            `💵 <b>សរុប៖</b> ${currencySymbol}${total}`,
+            `យើងនឹងជូនដំណឹងភ្លាមៗ ពេលការបញ្ជាទិញរបស់អ្នករួចរាល់! ✨`,
+          ].join('\n')
+        : [
+            `🎉 <b>Your order has been accepted!</b>`,
+            ``,
+            `Order <code>${orderNum}</code> has been accepted by the café and is now being prepared. ☕`,
+            ``,
+            `💵 <b>Total:</b> ${currencySymbol}${total}`,
+            `We'll notify you as soon as your order is ready! ✨`,
+          ].join('\n')
+
+    case 'ready':
+      return kh
+        ? [
+            `🥤 <b>ការបញ្ជាទិញរបស់អ្នករួចរាល់ហើយ!</b>`,
+            ``,
+            `ការបញ្ជាទិញ <code>${orderNum}</code> រួចរាល់ហើយ។ សូមអញ្ជើញមកទទួលយក។ 🎉`,
+          ].join('\n')
+        : [
+            `🥤 <b>Your order is ready!</b>`,
+            ``,
+            `Order <code>${orderNum}</code> is ready. Please come and collect it. 🎉`,
+          ].join('\n')
 
     case 'rejected':
     case 'canceled':
-      return [
-        `🚫 <b>Order Update</b>`,
-        ``,
-        `Your order <code>${orderNum}</code> could not be accepted by the café at this time.`,
-        `Please contact the shop if you have any questions.`,
-      ].join('\n')
+      return kh
+        ? [
+            `🚫 <b>ព័ត៌មានអំពីការបញ្ជាទិញ</b>`,
+            ``,
+            `ការបញ្ជាទិញ <code>${orderNum}</code> របស់អ្នកមិនអាចត្រូវបានទទួលយកនៅពេលនេះទេ។`,
+            `ប្រសិនបើមានសំណួរ សូមទាក់ទងហាង។`,
+          ].join('\n')
+        : [
+            `🚫 <b>Order Update</b>`,
+            ``,
+            `Your order <code>${orderNum}</code> could not be accepted by the café at this time.`,
+            `Please contact the shop if you have any questions.`,
+          ].join('\n')
 
     default:
       return null
   }
+}
+
+/** Inline keyboard offering the two supported languages (callback `setlang:<code>`). */
+export function buildLanguageKeyboard(): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        { text: '🇬🇧 English', callback_data: 'setlang:en' },
+        { text: '🇰🇭 ខ្មែរ', callback_data: 'setlang:kh' },
+      ],
+    ],
+  }
+}
+
+/** Prompt asking the user to pick a language, shown in both languages. */
+export function buildLanguagePrompt(): string {
+  return [`🌐 <b>Choose your language</b>`, `សូមជ្រើសរើសភាសារបស់អ្នក`].join('\n')
+}
+
+/** Confirmation after a language change, written in the newly chosen language. */
+export function buildLanguageConfirmation(lang: CustomerLang): string {
+  return lang === 'kh'
+    ? `✅ ភាសាត្រូវបានប្តូរទៅ <b>ខ្មែរ</b>។ យើងនឹងផ្ញើដំណឹងអំពីការបញ្ជាទិញជាភាសាខ្មែរ។`
+    : `✅ Language set to <b>English</b>. We'll send your order updates in English.`
+}
+
+/** Friendly /start greeting (shown in both languages) with the language buttons. */
+export function buildStartGreeting(): string {
+  return [
+    `👋 <b>Welcome to Routine Café & Bakery Orders!</b>`,
+    `សូមស្វាគមន៍មកកាន់ Routine Café & Bakery!`,
+    ``,
+    `Use the button below or /language anytime to change your language.`,
+    `ប្រើប៊ូតុងខាងក្រោម ឬ /language ដើម្បីប្តូរភាសា។`,
+  ].join('\n')
 }
 
 /** A human, emoji-prefixed status line for the group message. */

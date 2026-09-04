@@ -81,6 +81,8 @@ export const Messages = {
   MENU_RETRIEVED: 'Menu retrieved successfully',
   PREORDER_CREATED: 'Your pre-order has been placed. The café will contact you shortly.',
   PREORDERS_RETRIEVED: 'Pre-orders retrieved successfully',
+  PROFILE_RETRIEVED: 'Profile retrieved successfully',
+  LANGUAGE_UPDATED: 'Language preference updated',
   TELEGRAM_AUTH_FAILED: 'Could not verify your Telegram session. Please reopen the app.',
   CUSTOMER_BLOCKED: 'You are temporarily blocked from placing orders. Please contact the café.',
   CUSTOMER_BLOCKED_ADDED: 'Customer blocked',
