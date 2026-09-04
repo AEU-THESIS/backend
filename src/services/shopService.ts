@@ -17,6 +17,8 @@ const shopSettingsSelect = {
   receiptFooter: true,
   isOrderManagementEnabled: true,
   isShopClosed: true,
+  closureMessage: true,
+  closureDescription: true,
   createdAt: true,
   updatedAt: true,
 } as const

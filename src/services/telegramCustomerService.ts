@@ -1,4 +1,5 @@
 import { prisma } from '../core/Service'
+import { telegram, buildCustomerStatusNotification } from '../utils/telegram'
 
 /**
  * Block-list for abusive Telegram guests, used to keep spam pre-orders out of the
@@ -66,5 +67,136 @@ export const telegramCustomerService = {
   /** Lifts a block. */
   async unblock(shopId: number, telegramUserId: string): Promise<void> {
     await prisma.blockedTelegramCustomer.deleteMany({ where: { shopId, telegramUserId } })
+  },
+
+  // ── Customer profile (language preference + remembered contact details) ──────
+  // These are global per Telegram user (not shop-scoped): the language is how the
+  // bot talks to the person, and their name/phone are the same across shops.
+
+  /** Supported Mini App / bot languages, matching the frontend i18n locale codes. */
+  SUPPORTED_LANGUAGES: ['en', 'kh'] as const,
+
+  /** Normalizes any input to a supported language code, defaulting to English. */
+  normalizeLanguage(input?: string | null): 'en' | 'kh' {
+    return input === 'kh' ? 'kh' : 'en'
+  },
+
+  /**
+   * The language the bot should use for this Telegram user. Falls back to English
+   * for a user who has never set a preference (or on any lookup error).
+   */
+  async getLanguage(telegramUserId: string): Promise<'en' | 'kh'> {
+    if (!telegramUserId) return 'en'
+    try {
+      const row = await prisma.telegramCustomer.findUnique({
+        where: { telegramUserId },
+        select: { languageCode: true },
+      })
+      return this.normalizeLanguage(row?.languageCode)
+    } catch {
+      // Best-effort: a transient DB error must never turn a committed order action
+      // into a failure. Fall back to English.
+      return 'en'
+    }
+  },
+
+  /**
+   * Persists the user's language choice (from the bot `/language` command or the
+   * Mini App toggle). Upserts so a first-time user is created on the spot.
+   */
+  async setLanguage(
+    telegramUserId: string,
+    language: string,
+    telegramUsername?: string | null
+  ): Promise<'en' | 'kh'> {
+    const languageCode = this.normalizeLanguage(language)
+    await prisma.telegramCustomer.upsert({
+      where: { telegramUserId },
+      create: {
+        telegramUserId,
+        languageCode,
+        telegramUsername: telegramUsername ?? null,
+      },
+      update: {
+        languageCode,
+        // Only refresh the username when a real value is supplied; a null/undefined
+        // must never wipe a previously stored username (parity with name/phone).
+        ...(telegramUsername != null ? { telegramUsername } : {}),
+      },
+    })
+    return languageCode
+  },
+
+  /** The remembered profile for pre-filling checkout (name, phone, language). */
+  async getProfile(telegramUserId: string) {
+    const empty = { name: null, phone: null, language: 'en' as const }
+    if (!telegramUserId) return empty
+    try {
+      const row = await prisma.telegramCustomer.findUnique({
+        where: { telegramUserId },
+        select: { lastCustomerName: true, lastCustomerPhone: true, languageCode: true },
+      })
+      if (!row) return empty
+      return {
+        name: row.lastCustomerName,
+        phone: row.lastCustomerPhone,
+        language: this.normalizeLanguage(row.languageCode),
+      }
+    } catch {
+      // Best-effort: pre-fill is a convenience, never worth failing the request.
+      return empty
+    }
+  },
+
+  /**
+   * Remembers the contact details a guest used on an order so the next checkout can
+   * pre-fill them. Never overrides an existing language preference. Best-effort:
+   * callers invoke this fire-and-forget after the order is safely persisted.
+   */
+  async rememberContact(
+    telegramUserId: string,
+    details: { name?: string | null; phone?: string | null; telegramUsername?: string | null }
+  ): Promise<void> {
+    if (!telegramUserId) return
+    const name = details.name?.trim() || null
+    const phone = details.phone?.trim() || null
+    await prisma.telegramCustomer.upsert({
+      where: { telegramUserId },
+      create: {
+        telegramUserId,
+        lastCustomerName: name,
+        lastCustomerPhone: phone,
+        telegramUsername: details.telegramUsername ?? null,
+      },
+      update: {
+        // Only overwrite when a value was actually provided, so a blank field on a
+        // later order doesn't wipe previously remembered details.
+        ...(name !== null ? { lastCustomerName: name } : {}),
+        ...(phone !== null ? { lastCustomerPhone: phone } : {}),
+        // Same guard as name/phone — never overwrite a stored username with null.
+        ...(details.telegramUsername != null ? { telegramUsername: details.telegramUsername } : {}),
+      },
+    })
+  },
+
+  /**
+   * Sends a customer the order-status update (accepted / ready / rejected /
+   * canceled) in their saved language, over Telegram. Owns the whole flow —
+   * language lookup, message construction, and delivery — so controllers only
+   * hand off the order. Entirely best-effort: it never throws, so a notification
+   * problem can't undo an already-committed order action.
+   */
+  async notifyOrderStatus(
+    order: { orderType?: string; telegramUserId?: string | null; [k: string]: unknown },
+    status: string
+  ): Promise<void> {
+    try {
+      if (order?.orderType !== 'pre_order' || !order.telegramUserId) return
+      const lang = await this.getLanguage(order.telegramUserId)
+      const message = buildCustomerStatusNotification(order, status, lang)
+      if (message) await telegram.notifyCustomer(order.telegramUserId, message)
+    } catch (err) {
+      console.warn('[telegram] failed to notify customer of order status:', err)
+    }
   },
 }
