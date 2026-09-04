@@ -6,7 +6,6 @@ import { orderSseController } from './orderSseController'
 import {
   telegram,
   buildPreOrderMessage,
-  buildCustomerStatusNotification,
   buildLanguageKeyboard,
   buildLanguagePrompt,
   buildLanguageConfirmation,
@@ -115,15 +114,15 @@ export const telegramWebhookController = {
       let toast = ''
       if (action === 'reject') {
         await orderService.rejectPreOrder(ctx.shopId, orderId)
-        toast = 'Pre-order rejected 🚫'
+        toast = 'Pre-order rejected'
       } else if (action in ACTION_TO_STATUS) {
         await orderService.updateOrderStatus(ctx.shopId, orderId, ACTION_TO_STATUS[action])
         toast =
           action === 'accept'
-            ? 'Accepted — now preparing ☕'
+            ? 'Accepted — now preparing'
             : action === 'ready'
-              ? 'Marked ready 🥤'
-              : 'Completed & marked paid ✔️'
+              ? 'Marked ready'
+              : 'Completed and marked paid'
       } else {
         await telegram.answerCallback(cb.id)
         return res.status(200).json({ ok: true })
@@ -139,15 +138,9 @@ export const telegramWebhookController = {
         await telegram.editMessageText(chatId, messageId, text, replyMarkup)
       }
 
-      // Notify customer if placed through Telegram Mini App, in their saved language.
-      if (fullOrder.orderType === 'pre_order' && fullOrder.telegramUserId) {
-        const nextSt = action === 'reject' ? 'rejected' : ACTION_TO_STATUS[action]
-        const lang = await telegramCustomerService.getLanguage(fullOrder.telegramUserId)
-        const customerMsg = buildCustomerStatusNotification(fullOrder, nextSt, currency, lang)
-        if (customerMsg) {
-          telegram.notifyCustomer(fullOrder.telegramUserId, customerMsg).catch(() => {})
-        }
-      }
+      // Notify the customer in their saved language (best-effort; never throws).
+      const nextSt = action === 'reject' ? 'rejected' : ACTION_TO_STATUS[action]
+      void telegramCustomerService.notifyOrderStatus(fullOrder, nextSt)
     } catch (err) {
       console.error('⚠️ [telegram webhook] failed to handle callback:', err)
       try {
@@ -211,7 +204,7 @@ async function handleLanguageSelection(cb: any): Promise<void> {
   )
   const confirmation = buildLanguageConfirmation(lang)
 
-  await telegram.answerCallback(cb.id, lang === 'kh' ? 'ភាសា៖ ខ្មែរ ✅' : 'Language: English ✅')
+  await telegram.answerCallback(cb.id, lang === 'kh' ? 'ភាសា៖ ខ្មែរ' : 'Language: English')
   // Replace the prompt with the confirmation (drops the buttons).
   if (chatId && messageId) {
     await telegram.editMessageText(chatId, messageId, confirmation)

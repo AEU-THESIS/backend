@@ -243,67 +243,63 @@ export function escapeHtml(input: string): string {
 export type CustomerLang = 'en' | 'kh'
 
 /**
- * Builds user-friendly direct notifications sent to the customer on status changes,
+ * Builds the direct notification sent to the customer on an order status change,
  * in the customer's saved language (`lang`; defaults to English). The caller looks
- * up the language via `telegramCustomerService.getLanguage` before calling.
+ * up the language via `telegramCustomerService.getLanguage`. Kept intentionally
+ * plain and professional: no emoji, and no order total (the amount is settled at
+ * the counter, so it is not repeated to the customer here).
  */
 export function buildCustomerStatusNotification(
   order: any,
   status: string,
-  currencySymbol = '$',
   lang: CustomerLang = 'en'
 ): string | null {
   const orderNum = escapeHtml(order.orderNumber ?? '')
-  const total = Number(order.totalAmount ?? 0).toFixed(2)
   const kh = lang === 'kh'
 
   switch (status) {
     case 'preparing':
       return kh
         ? [
-            `🎉 <b>ការបញ្ជាទិញរបស់អ្នកត្រូវបានទទួលយក!</b>`,
+            `<b>ការបញ្ជាទិញរបស់អ្នកត្រូវបានទទួលយក</b>`,
             ``,
-            `ការបញ្ជាទិញ <code>${orderNum}</code> ត្រូវបានហាងទទួលយក ហើយកំពុងរៀបចំ។ ☕`,
-            ``,
-            `💵 <b>សរុប៖</b> ${currencySymbol}${total}`,
-            `យើងនឹងជូនដំណឹងភ្លាមៗ ពេលការបញ្ជាទិញរបស់អ្នករួចរាល់! ✨`,
+            `ការបញ្ជាទិញលេខ <code>${orderNum}</code> ត្រូវបានទទួលយក ហើយកំពុងរៀបចំ។`,
+            `យើងនឹងជូនដំណឹងជូនអ្នកវិញ នៅពេលការបញ្ជាទិញរួចរាល់។`,
           ].join('\n')
         : [
-            `🎉 <b>Your order has been accepted!</b>`,
+            `<b>Your order has been accepted</b>`,
             ``,
-            `Order <code>${orderNum}</code> has been accepted by the café and is now being prepared. ☕`,
-            ``,
-            `💵 <b>Total:</b> ${currencySymbol}${total}`,
-            `We'll notify you as soon as your order is ready! ✨`,
+            `Order <code>${orderNum}</code> has been accepted and is now being prepared.`,
+            `We will notify you once it is ready.`,
           ].join('\n')
 
     case 'ready':
       return kh
         ? [
-            `🥤 <b>ការបញ្ជាទិញរបស់អ្នករួចរាល់ហើយ!</b>`,
+            `<b>ការបញ្ជាទិញរបស់អ្នករួចរាល់ហើយ</b>`,
             ``,
-            `ការបញ្ជាទិញ <code>${orderNum}</code> រួចរាល់ហើយ។ សូមអញ្ជើញមកទទួលយក។ 🎉`,
+            `ការបញ្ជាទិញលេខ <code>${orderNum}</code> រួចរាល់ហើយ។ សូមអញ្ជើញមកទទួលយក។`,
           ].join('\n')
         : [
-            `🥤 <b>Your order is ready!</b>`,
+            `<b>Your order is ready</b>`,
             ``,
-            `Order <code>${orderNum}</code> is ready. Please come and collect it. 🎉`,
+            `Order <code>${orderNum}</code> is ready. Please come and collect it.`,
           ].join('\n')
 
     case 'rejected':
     case 'canceled':
       return kh
         ? [
-            `🚫 <b>ព័ត៌មានអំពីការបញ្ជាទិញ</b>`,
+            `<b>ព័ត៌មានអំពីការបញ្ជាទិញ</b>`,
             ``,
-            `ការបញ្ជាទិញ <code>${orderNum}</code> របស់អ្នកមិនអាចត្រូវបានទទួលយកនៅពេលនេះទេ។`,
-            `ប្រសិនបើមានសំណួរ សូមទាក់ទងហាង។`,
+            `សូមអភ័យទោស ការបញ្ជាទិញលេខ <code>${orderNum}</code> របស់អ្នកមិនអាចទទួលយកបាននៅពេលនេះទេ។`,
+            `សូមទាក់ទងមកកាន់ហាង ប្រសិនបើមានចម្ងល់បន្ថែម។`,
           ].join('\n')
         : [
-            `🚫 <b>Order Update</b>`,
+            `<b>Order update</b>`,
             ``,
-            `Your order <code>${orderNum}</code> could not be accepted by the café at this time.`,
-            `Please contact the shop if you have any questions.`,
+            `We are sorry. Your order <code>${orderNum}</code> could not be accepted at this time.`,
+            `Please contact the café if you have any questions.`,
           ].join('\n')
 
     default:
@@ -316,8 +312,8 @@ export function buildLanguageKeyboard(): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: '🇬🇧 English', callback_data: 'setlang:en' },
-        { text: '🇰🇭 ខ្មែរ', callback_data: 'setlang:kh' },
+        { text: 'English', callback_data: 'setlang:en' },
+        { text: 'ខ្មែរ', callback_data: 'setlang:kh' },
       ],
     ],
   }
@@ -325,42 +321,42 @@ export function buildLanguageKeyboard(): InlineKeyboard {
 
 /** Prompt asking the user to pick a language, shown in both languages. */
 export function buildLanguagePrompt(): string {
-  return [`🌐 <b>Choose your language</b>`, `សូមជ្រើសរើសភាសារបស់អ្នក`].join('\n')
+  return [`Please choose your language.`, `សូមជ្រើសរើសភាសារបស់អ្នក។`].join('\n')
 }
 
 /** Confirmation after a language change, written in the newly chosen language. */
 export function buildLanguageConfirmation(lang: CustomerLang): string {
   return lang === 'kh'
-    ? `✅ ភាសាត្រូវបានប្តូរទៅ <b>ខ្មែរ</b>។ យើងនឹងផ្ញើដំណឹងអំពីការបញ្ជាទិញជាភាសាខ្មែរ។`
-    : `✅ Language set to <b>English</b>. We'll send your order updates in English.`
+    ? `ភាសាត្រូវបានកំណត់ជាភាសាខ្មែរ។ ព័ត៌មានអំពីការបញ្ជាទិញនឹងផ្ញើជូនជាភាសាខ្មែរ។`
+    : `Your language has been set to English. Order updates will be sent in English.`
 }
 
-/** Friendly /start greeting (shown in both languages) with the language buttons. */
+/** /start greeting, shown in both languages, with the language buttons. */
 export function buildStartGreeting(): string {
   return [
-    `👋 <b>Welcome to Routine Café & Bakery Orders!</b>`,
-    `សូមស្វាគមន៍មកកាន់ Routine Café & Bakery!`,
+    `<b>Welcome to Routine Café &amp; Bakery Orders.</b>`,
+    `You can change your language below, or use the /language command at any time.`,
     ``,
-    `Use the button below or /language anytime to change your language.`,
-    `ប្រើប៊ូតុងខាងក្រោម ឬ /language ដើម្បីប្តូរភាសា។`,
+    `<b>សូមស្វាគមន៍មកកាន់ Routine Café &amp; Bakery។</b>`,
+    `អ្នកអាចប្តូរភាសាខាងក្រោម ឬប្រើពាក្យបញ្ជា /language នៅពេលណាក៏បាន។`,
   ].join('\n')
 }
 
-/** A human, emoji-prefixed status line for the group message. */
+/** A concise status line for the staff group message. */
 function preOrderStatusLine(status: string): string {
   switch (status) {
     case 'pending':
-      return '🟡 <b>Awaiting acceptance</b>'
+      return '<b>Awaiting acceptance</b>'
     case 'preparing':
-      return '🔵 <b>Preparing</b>'
+      return '<b>Preparing</b>'
     case 'ready':
-      return '🟢 <b>Ready</b>'
+      return '<b>Ready</b>'
     case 'completed':
-      return '✔️ <b>Completed &amp; paid</b>'
+      return '<b>Completed &amp; paid</b>'
     case 'rejected':
-      return '❌ <b>Rejected</b>'
+      return '<b>Rejected</b>'
     case 'canceled':
-      return '🚫 <b>Canceled</b>'
+      return '<b>Canceled</b>'
     default:
       return ''
   }
@@ -388,15 +384,15 @@ export function buildPreOrderMessage(
   }
 
   lines.push('')
-  lines.push(`💵 Total: ${currencySymbol}${Number(order.totalAmount).toFixed(2)}`)
-  if (order.customerName) lines.push(`Customer name:  ${escapeHtml(order.customerName)}`)
+  lines.push(`Total: ${currencySymbol}${Number(order.totalAmount).toFixed(2)}`)
+  if (order.customerName) lines.push(`Customer name: ${escapeHtml(order.customerName)}`)
   if (order.customerPhone) lines.push(`Phone number: ${escapeHtml(order.customerPhone)}`)
   if (order.telegramUsername) lines.push(`Username: @${escapeHtml(order.telegramUsername)}`)
-  if (order.deliveryAddress) lines.push(`📝 ${escapeHtml(order.deliveryAddress)}`)
+  if (order.deliveryAddress) lines.push(`Note: ${escapeHtml(order.deliveryAddress)}`)
   if (order.deliveryLat != null && order.deliveryLng != null) {
     const lat = Number(order.deliveryLat)
     const lng = Number(order.deliveryLng)
-    lines.push(`📍 <a href="https://maps.google.com/?q=${lat},${lng}">Open location in Maps</a>`)
+    lines.push(`<a href="https://maps.google.com/?q=${lat},${lng}">Open location in Maps</a>`)
   }
 
   return { text: lines.join('\n'), replyMarkup: buildPreOrderKeyboard(order) }
@@ -404,9 +400,9 @@ export function buildPreOrderMessage(
 
 /**
  * Stateful inline keyboard for a pre-order — the buttons follow the lifecycle:
- *   pending   → [✅ Accept] [❌ Reject]
- *   preparing → [🥤 Mark ready] [✔️ Complete]
- *   ready     → [✔️ Mark complete]
+ *   pending   → [Accept] [Reject]
+ *   preparing → [Mark ready] [Complete]
+ *   ready     → [Mark complete]
  *   terminal  → (no action buttons)
  * A "Message customer" link is shown while the order is still active. NOTE: there
  * is deliberately no Block button here — blocking is Admin/Manager-only and is done
@@ -419,21 +415,21 @@ export function buildPreOrderKeyboard(order: any): InlineKeyboard {
 
   if (status === 'pending') {
     rows.push([
-      { text: '✅ Accept', callback_data: `accept:${order.id}` },
-      { text: '❌ Reject', callback_data: `reject:${order.id}` },
+      { text: 'Accept', callback_data: `accept:${order.id}` },
+      { text: 'Reject', callback_data: `reject:${order.id}` },
     ])
   } else if (status === 'preparing') {
     rows.push([
-      { text: '🥤 Mark ready', callback_data: `ready:${order.id}` },
-      { text: '✔️ Complete', callback_data: `complete:${order.id}` },
+      { text: 'Mark ready', callback_data: `ready:${order.id}` },
+      { text: 'Complete', callback_data: `complete:${order.id}` },
     ])
   } else if (status === 'ready') {
-    rows.push([{ text: '✔️ Mark complete', callback_data: `complete:${order.id}` }])
+    rows.push([{ text: 'Mark complete', callback_data: `complete:${order.id}` }])
   }
 
   const active = status === 'pending' || status === 'preparing' || status === 'ready'
   if (order.telegramUsername && active) {
-    rows.push([{ text: '💬 Message customer', url: `https://t.me/${order.telegramUsername}` }])
+    rows.push([{ text: 'Message customer', url: `https://t.me/${order.telegramUsername}` }])
   }
 
   return { inline_keyboard: rows }

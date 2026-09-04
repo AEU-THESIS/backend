@@ -18,7 +18,7 @@ import {
 } from '../validations/orderValidation'
 import { AppError } from '../utils/appError'
 import { orderSseController } from './orderSseController'
-import { telegram, buildCustomerStatusNotification } from '../utils/telegram'
+import { telegram } from '../utils/telegram'
 import { telegramCustomerService } from '../services/telegramCustomerService'
 
 export const orderController = {
@@ -105,14 +105,8 @@ export const orderController = {
     // Sync Telegram group notification message & buttons in real time
     telegram.syncOrderGroupMessage(updatedOrder).catch(() => {})
 
-    // Send direct notification to customer if ordered via Telegram Mini App
-    if (updatedOrder.orderType === 'pre_order' && updatedOrder.telegramUserId) {
-      const lang = await telegramCustomerService.getLanguage(updatedOrder.telegramUserId)
-      const msg = buildCustomerStatusNotification(updatedOrder, parsed.data.status, undefined, lang)
-      if (msg) {
-        telegram.notifyCustomer(updatedOrder.telegramUserId, msg).catch(() => {})
-      }
-    }
+    // Notify the customer (in their language) if this was a Telegram Mini App order.
+    void telegramCustomerService.notifyOrderStatus(updatedOrder, parsed.data.status)
 
     return sendSuccess(res, updatedOrder, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
   }),
@@ -138,13 +132,7 @@ export const orderController = {
     // Sync Telegram group notification message & buttons in real time
     telegram.syncOrderGroupMessage(order).catch(() => {})
 
-    if (order.orderType === 'pre_order' && order.telegramUserId) {
-      const lang = await telegramCustomerService.getLanguage(order.telegramUserId)
-      const msg = buildCustomerStatusNotification(order, 'canceled', undefined, lang)
-      if (msg) {
-        telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
-      }
-    }
+    void telegramCustomerService.notifyOrderStatus(order, 'canceled')
 
     return sendSuccess(res, order, Messages.ORDER_VOIDED, HttpStatus.OK)
   }),
@@ -166,14 +154,8 @@ export const orderController = {
     // Sync Telegram group notification message & buttons in real time
     telegram.syncOrderGroupMessage(order).catch(() => {})
 
-    // Send direct notification to customer if ordered via Telegram Mini App
-    if (order.orderType === 'pre_order' && order.telegramUserId) {
-      const lang = await telegramCustomerService.getLanguage(order.telegramUserId)
-      const msg = buildCustomerStatusNotification(order, 'rejected', undefined, lang)
-      if (msg) {
-        telegram.notifyCustomer(order.telegramUserId, msg).catch(() => {})
-      }
-    }
+    // Notify the customer (in their language) if this was a Telegram Mini App order.
+    void telegramCustomerService.notifyOrderStatus(order, 'rejected')
 
     return sendSuccess(res, order, Messages.ORDER_STATUS_UPDATED, HttpStatus.OK)
   }),

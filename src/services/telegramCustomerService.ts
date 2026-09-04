@@ -1,4 +1,5 @@
 import { prisma } from '../core/Service'
+import { telegram, buildCustomerStatusNotification } from '../utils/telegram'
 
 /**
  * Block-list for abusive Telegram guests, used to keep spam pre-orders out of the
@@ -86,11 +87,17 @@ export const telegramCustomerService = {
    */
   async getLanguage(telegramUserId: string): Promise<'en' | 'kh'> {
     if (!telegramUserId) return 'en'
-    const row = await prisma.telegramCustomer.findUnique({
-      where: { telegramUserId },
-      select: { languageCode: true },
-    })
-    return this.normalizeLanguage(row?.languageCode)
+    try {
+      const row = await prisma.telegramCustomer.findUnique({
+        where: { telegramUserId },
+        select: { languageCode: true },
+      })
+      return this.normalizeLanguage(row?.languageCode)
+    } catch {
+      // Best-effort: a transient DB error must never turn a committed order action
+      // into a failure. Fall back to English.
+      return 'en'
+    }
   },
 
   /**
@@ -122,16 +129,22 @@ export const telegramCustomerService = {
 
   /** The remembered profile for pre-filling checkout (name, phone, language). */
   async getProfile(telegramUserId: string) {
-    if (!telegramUserId) return null
-    const row = await prisma.telegramCustomer.findUnique({
-      where: { telegramUserId },
-      select: { lastCustomerName: true, lastCustomerPhone: true, languageCode: true },
-    })
-    if (!row) return { name: null, phone: null, language: 'en' as const }
-    return {
-      name: row.lastCustomerName,
-      phone: row.lastCustomerPhone,
-      language: this.normalizeLanguage(row.languageCode),
+    const empty = { name: null, phone: null, language: 'en' as const }
+    if (!telegramUserId) return empty
+    try {
+      const row = await prisma.telegramCustomer.findUnique({
+        where: { telegramUserId },
+        select: { lastCustomerName: true, lastCustomerPhone: true, languageCode: true },
+      })
+      if (!row) return empty
+      return {
+        name: row.lastCustomerName,
+        phone: row.lastCustomerPhone,
+        language: this.normalizeLanguage(row.languageCode),
+      }
+    } catch {
+      // Best-effort: pre-fill is a convenience, never worth failing the request.
+      return empty
     }
   },
 
@@ -164,5 +177,26 @@ export const telegramCustomerService = {
         ...(details.telegramUsername != null ? { telegramUsername: details.telegramUsername } : {}),
       },
     })
+  },
+
+  /**
+   * Sends a customer the order-status update (accepted / ready / rejected /
+   * canceled) in their saved language, over Telegram. Owns the whole flow —
+   * language lookup, message construction, and delivery — so controllers only
+   * hand off the order. Entirely best-effort: it never throws, so a notification
+   * problem can't undo an already-committed order action.
+   */
+  async notifyOrderStatus(
+    order: { orderType?: string; telegramUserId?: string | null; [k: string]: unknown },
+    status: string
+  ): Promise<void> {
+    try {
+      if (order?.orderType !== 'pre_order' || !order.telegramUserId) return
+      const lang = await this.getLanguage(order.telegramUserId)
+      const message = buildCustomerStatusNotification(order, status, lang)
+      if (message) await telegram.notifyCustomer(order.telegramUserId, message)
+    } catch (err) {
+      console.warn('[telegram] failed to notify customer of order status:', err)
+    }
   },
 }

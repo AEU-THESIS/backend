@@ -128,12 +128,10 @@ export const publicOrderController = {
   getMyProfile: catchAsync(async (req: Request, res: Response) => {
     const telegramUser = req.telegramUser!
     const profile = await telegramCustomerService.getProfile(telegramUser.id)
-    return sendSuccess(
-      res,
-      profile ?? { name: null, phone: null, language: 'en' },
-      Messages.PROFILE_RETRIEVED,
-      HttpStatus.OK
-    )
+    // Personal contact data tied to one Telegram identity — never let a shared
+    // cache serve it to another guest when the Mini App switches user.
+    res.set('Cache-Control', 'no-store')
+    return sendSuccess(res, profile, Messages.PROFILE_RETRIEVED, HttpStatus.OK)
   }),
 
   /** Persists the guest's language choice from the Mini App toggle. */
