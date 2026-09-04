@@ -47,6 +47,7 @@ export const categoryService = {
         shopId,
         name: data.name,
         isActive: data.isActive,
+        type: data.type,
       },
       select: categorySelect,
     })
@@ -72,6 +73,7 @@ export const categoryService = {
       data: {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.isActive !== undefined && { isActive: data.isActive }),
+        ...(data.type !== undefined && { type: data.type }),
       },
       select: categorySelect,
     })
@@ -125,6 +127,7 @@ export const categoryService = {
     const where = {
       shopId,
       ...(filters.search ? { name: { contains: filters.search } } : {}),
+      ...(filters.type ? { type: filters.type } : {}),
     }
 
     if (filters.page === undefined) {

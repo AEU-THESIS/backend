@@ -20,6 +20,11 @@ export const authController = {
     return sendSuccess(res, null, Messages.LOGGED_OUT)
   }),
 
+  me: catchAsync(async (req: Request, res: Response) => {
+    const user = await authService.getMe(req.user!.user_id)
+    return sendSuccess(res, user)
+  }),
+
   forgotPassword: catchAsync(async (req: Request, res: Response) => {
     const body = forgotPasswordSchema.parse(req.body)
     await authService.forgotPassword(body)

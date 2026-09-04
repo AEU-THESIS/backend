@@ -22,12 +22,21 @@
     "url": "https://github.com/AEU-THESIS/backend/issues"
   },
   "homepage": "https://github.com/AEU-THESIS/backend#readme",
+  "overrides": {
+    "mariadb": "^3.5.3",
+    "uuid": "^14.0.0",
+    "deepmerge-ts": "^8.0.0",
+    "fast-uri": "^3.1.7",
+    "qs": "^6.16.0",
+    "mysql2": "^3.24.3"
+  },
   "dependencies": {
     "@prisma/adapter-mariadb": "^7.6.0",
     "@prisma/client": "^7.6.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.0",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.2",
     "helmet": "^8.1.0",

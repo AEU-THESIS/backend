@@ -37,6 +37,21 @@ router.get(
   publicOrderController.getMyOrders
 )
 
+// Customer profile (language + remembered contact details). Shop-agnostic — keyed
+// by the verified Telegram guest, so no slug in the path.
+router.get(
+  '/me/profile',
+  requireTelegramMiniApp,
+  publicReadLimiter,
+  publicOrderController.getMyProfile
+)
+router.patch(
+  '/me/language',
+  requireTelegramMiniApp,
+  publicReadLimiter,
+  publicOrderController.setMyLanguage
+)
+
 // Public SSE stream for real-time order status updates (replaces continuous polling)
 router.get('/shops/:slug/orders/sse', (req, res) => orderSseController.subscribePublic(req, res))
 

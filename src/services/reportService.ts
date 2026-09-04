@@ -7,7 +7,13 @@ import {
   getKpiRange,
   KpiRange,
   buildRangeBuckets,
+  shopDayStartUtc,
+  shopDayEndUtc,
+  shopDateString,
+  toShopWallClock,
 } from '../utils/date'
+import { buildSalesSummaryReport } from './salesSummaryExport'
+import { renderSalesSummaryWorkbook, salesSummaryFileName } from '../utils/salesSummaryWorkbook'
 
 // Cancelled/voided money must never show up in a report. Only orders that actually
 // took money count: `paid`, plus `partially_refunded` (whose `totalAmount` already
@@ -18,23 +24,90 @@ const soldOrderWhere: Prisma.OrderWhereInput = {
   fulfillmentStatus: { not: 'canceled' },
 }
 
-export const reportService = {
-  async getDailySummary(shopId: number, date?: string) {
-    let targetDate = new Date()
+/**
+ * Item and category revenue must reconcile with Net Sales, which sums
+ * `Order.totalAmount` — an after-discount figure. A line's own `subtotal` is a
+ * gross, pre-discount amount, so summing subtotals overstates revenue by every
+ * order's discount (AT-93). We close the gap by apportioning each order's net
+ * total across its surviving lines in proportion to their gross subtotal:
+ *
+ *   lineNetRevenue = subtotal × (order.totalAmount ÷ order's surviving gross)
+ *
+ * Because `totalAmount` is itself `Σ subtotals − discount` (recomputed over the
+ * surviving lines on cancellation), the per-order shares sum back to
+ * `totalAmount` exactly — so period revenue sums to Net Sales regardless of how
+ * the discount was distributed, and even when a large fixed discount clamped
+ * the order's net to 0. `items` must be the same `canceledAt: null` lines the
+ * reports aggregate, each carrying its parent order's id (`id`, `orderId`) and
+ * `totalAmount`.
+ *
+ * Shares are computed in integer cents and the leftover cents from flooring are
+ * handed to the largest-remainder lines (stable tiebreak by order-item id), so
+ * each order's lines sum back to its net to the cent — no fractional-cent drift
+ * against Net Sales (AT-93).
+ */
+function apportionNetRevenue<
+  T extends {
+    id: number
+    orderId: number
+    subtotal: Prisma.Decimal
+    order: { totalAmount: Prisma.Decimal }
+  },
+>(items: T[]): Map<T, number> {
+  // Group surviving (report-visible) lines by their parent order.
+  const linesByOrder = new Map<number, T[]>()
+  for (const item of items) {
+    const group = linesByOrder.get(item.orderId)
+    if (group) group.push(item)
+    else linesByOrder.set(item.orderId, [item])
+  }
 
-    if (date) {
-      const parsed = new Date(`${date}T00:00:00`)
-      if (isNaN(parsed.getTime())) {
-        throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
-      }
-      targetDate = parsed
+  const netByLine = new Map<T, number>()
+  for (const lines of linesByOrder.values()) {
+    const gross = lines.reduce((sum, l) => sum + Number(l.subtotal), 0)
+    const netCents = Math.round(Number(lines[0].order.totalAmount) * 100)
+
+    // gross === 0 only when every surviving line is complimentary (subtotal 0),
+    // in which case the order's net is 0 too — nothing to apportion, avoid ÷0.
+    if (gross <= 0) {
+      for (const line of lines) netByLine.set(line, 0)
+      continue
     }
 
-    const startOfDay = new Date(targetDate)
-    startOfDay.setHours(0, 0, 0, 0)
+    // Floor each line's cent share, then distribute the leftover cents to the
+    // lines with the largest fractional remainder so the shares sum to netCents.
+    const shares = lines.map(line => {
+      const exact = (Number(line.subtotal) * netCents) / gross
+      const floor = Math.floor(exact)
+      return { line, floor, remainder: exact - floor }
+    })
+    let residual = netCents - shares.reduce((sum, s) => sum + s.floor, 0)
+    shares.sort((a, b) => b.remainder - a.remainder || a.line.id - b.line.id)
+    for (const s of shares) {
+      const cents = s.floor + (residual > 0 ? 1 : 0)
+      if (residual > 0) residual--
+      netByLine.set(s.line, cents / 100)
+    }
+  }
+  return netByLine
+}
 
-    const endOfDay = new Date(targetDate)
-    endOfDay.setHours(23, 59, 59, 999)
+export const reportService = {
+  /**
+   * Cash/KHQR breakdown for one day, or for the inclusive window
+   * [date, endDate] when `endDate` is supplied. Omitting `endDate` keeps the
+   * original single-day behaviour.
+   */
+  async getDailySummary(shopId: number, date?: string, endDate?: string) {
+    const firstDay = date ?? shopDateString(0)
+    const lastDay = endDate ?? firstDay
+
+    if (lastDay < firstDay) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
+    const startOfDay = shopDayStartUtc(firstDay)
+    const endOfDay = shopDayEndUtc(lastDay)
 
     const [groups, shop] = await Promise.all([
       prisma.order.groupBy({
@@ -137,6 +210,7 @@ export const reportService = {
         },
       },
       include: {
+        order: { select: { totalAmount: true } },
         product: {
           select: {
             name: true,
@@ -145,6 +219,10 @@ export const reportService = {
         },
       },
     })
+
+    // Revenue is the after-discount share of each line (see apportionNetRevenue),
+    // so item revenue reconciles with Net Sales rather than the gross subtotal.
+    const netRevenue = apportionNetRevenue(orderItems)
 
     // Aggregate quantity/revenue per product in JS to stay database-dialect independent.
     const aggregation: Record<
@@ -164,7 +242,7 @@ export const reportService = {
         }
       }
       aggregation[pid].quantity += item.quantity
-      aggregation[pid].revenue += Number(item.subtotal)
+      aggregation[pid].revenue += netRevenue.get(item) ?? 0
     })
 
     const productList = Object.values(aggregation).map(p => ({
@@ -272,23 +350,23 @@ export const reportService = {
       return { granularity, points }
     }
 
+    // Preset windows are anchored to the shop's local calendar, and stored
+    // timestamps are bucketed by their shop-local wall clock — so an order taken
+    // late in the shop's evening lands in the right day/month/year, not the
+    // server's.
     const now = new Date()
+    const shopNow = toShopWallClock(now)
     let start: Date
-    const points: { label: string; value: number }[] = []
+    let points: { label: string; value: number }[]
     let bucketIndex: (d: Date) => number
 
     if (granularity === 'weekly') {
-      const monday = new Date(now)
-      const mondayOffset = (monday.getDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
-      monday.setDate(monday.getDate() - mondayOffset)
-      monday.setHours(0, 0, 0, 0)
-      start = monday
-      ;['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(label =>
-        points.push({ label, value: 0 })
-      )
-      bucketIndex = d => (d.getDay() + 6) % 7
+      const mondayOffset = (shopNow.getUTCDay() + 6) % 7 // Sunday(0) → 6, Monday(1) → 0
+      start = shopDayStartUtc(shopDateString(-mondayOffset))
+      points = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(label => ({ label, value: 0 }))
+      bucketIndex = d => (toShopWallClock(d).getUTCDay() + 6) % 7
     } else if (granularity === 'monthly') {
-      start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0)
+      start = shopDayStartUtc(`${shopNow.getUTCFullYear()}-01-01`)
       const months = [
         'Jan',
         'Feb',
@@ -303,15 +381,16 @@ export const reportService = {
         'Nov',
         'Dec',
       ]
-      months.forEach(label => points.push({ label, value: 0 }))
-      bucketIndex = d => d.getMonth()
+      points = months.map(label => ({ label, value: 0 }))
+      bucketIndex = d => toShopWallClock(d).getUTCMonth()
     } else {
-      const startYear = now.getFullYear() - 4
-      start = new Date(startYear, 0, 1, 0, 0, 0, 0)
-      for (let y = startYear; y <= now.getFullYear(); y++) {
-        points.push({ label: String(y), value: 0 })
-      }
-      bucketIndex = d => d.getFullYear() - startYear
+      const startYear = shopNow.getUTCFullYear() - 4
+      start = shopDayStartUtc(`${startYear}-01-01`)
+      points = Array.from({ length: shopNow.getUTCFullYear() - startYear + 1 }, (_, i) => ({
+        label: String(startYear + i),
+        value: 0,
+      }))
+      bucketIndex = d => toShopWallClock(d).getUTCFullYear() - startYear
     }
 
     const orders = await prisma.order.findMany({
@@ -324,16 +403,16 @@ export const reportService = {
     })
 
     // Accumulate net sales into buckets in JS to stay database-dialect independent.
-    orders.forEach(o => {
+    for (const o of orders) {
       const idx = bucketIndex(o.createdAt)
       if (idx >= 0 && idx < points.length) {
         points[idx].value += Number(o.totalAmount)
       }
-    })
+    }
 
-    points.forEach(p => {
+    for (const p of points) {
       p.value = Math.round(p.value * 100) / 100
-    })
+    }
 
     return { granularity, points }
   },
@@ -351,11 +430,15 @@ export const reportService = {
         },
       },
       include: {
+        order: { select: { totalAmount: true } },
         product: {
           select: { name: true, price: true },
         },
       },
     })
+
+    // After-discount revenue share per line, so item revenue reconciles with Net Sales.
+    const netRevenue = apportionNetRevenue(orderItems)
 
     // Aggregate quantities and revenues by product in JavaScript to remain database-dialect independent
     const aggregation: Record<number, { name: string; quantity: number; revenue: number }> = {}
@@ -363,7 +446,6 @@ export const reportService = {
     orderItems.forEach(item => {
       const pid = item.productId
       const qty = item.quantity
-      const subtotal = Number(item.subtotal)
 
       if (!aggregation[pid]) {
         aggregation[pid] = {
@@ -373,7 +455,7 @@ export const reportService = {
         }
       }
       aggregation[pid].quantity += qty
-      aggregation[pid].revenue += subtotal
+      aggregation[pid].revenue += netRevenue.get(item) ?? 0
     })
 
     const productList = Object.values(aggregation)
@@ -403,6 +485,7 @@ export const reportService = {
         },
       },
       include: {
+        order: { select: { totalAmount: true } },
         product: {
           include: {
             category: { select: { name: true } },
@@ -411,12 +494,14 @@ export const reportService = {
       },
     })
 
+    // After-discount revenue share per line, so category revenue reconciles with Net Sales.
+    const netRevenue = apportionNetRevenue(orderItems)
+
     const aggregation: Record<string, { category: string; quantity: number; revenue: number }> = {}
 
     orderItems.forEach(item => {
       const catName = item.product?.category?.name || 'Uncategorized'
       const qty = item.quantity
-      const subtotal = Number(item.subtotal)
 
       if (!aggregation[catName]) {
         aggregation[catName] = {
@@ -426,7 +511,7 @@ export const reportService = {
         }
       }
       aggregation[catName].quantity += qty
-      aggregation[catName].revenue += subtotal
+      aggregation[catName].revenue += netRevenue.get(item) ?? 0
     })
 
     return Object.values(aggregation)
@@ -476,6 +561,56 @@ export const reportService = {
       outOfStock,
       lowStock,
     }
+  },
+
+  /**
+   * Builds the "Menu Performance" Sales Summary workbook for an inclusive window
+   * of shop-local days. Returns `null` when the window sold nothing, so the
+   * controller can answer 204 instead of handing back an empty sheet.
+   */
+  async getSalesSummaryExport(shopId: number, startDate: string, endDate: string) {
+    const [orders, shop] = await Promise.all([
+      prisma.order.findMany({
+        where: {
+          shopId,
+          ...soldOrderWhere,
+          createdAt: { gte: shopDayStartUtc(startDate), lte: shopDayEndUtc(endDate) },
+        },
+        select: {
+          createdAt: true,
+          paymentMethod: true,
+          bankName: true,
+          discountAmount: true,
+          items: {
+            select: {
+              productId: true,
+              quantity: true,
+              price: true,
+              extraPrice: true,
+              subtotal: true,
+              canceledQuantity: true,
+              product: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.shop.findUnique({ where: { id: shopId }, select: { name: true } }),
+    ])
+
+    if (!shop) {
+      throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    const report = buildSalesSummaryReport(orders, { startDate, endDate })
+    if (report.days.length === 0) return null
+
+    const buffer = await renderSalesSummaryWorkbook(report, {
+      shopName: shop.name,
+      generatedAt: new Date(),
+    })
+
+    return { buffer, fileName: salesSummaryFileName(startDate, endDate) }
   },
 
   async getCSVExportData(

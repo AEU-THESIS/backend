@@ -27,6 +27,14 @@ enum OptionSetType {
   custom
 }
 
+// Distinguishes categories used for the product/menu catalog (visible on POS
+// and the customer self-service menu) from categories used only to group
+// inventory supplies.
+enum CategoryType {
+  product
+  inventory
+}
+
 // Money/fulfillment lifecycle states. Kept as DB enums so an invalid status can
 // never be written (the app is the only writer, but the DB is the last guard).
 enum OrderPaymentStatus {
@@ -69,11 +77,20 @@ model Shop {
   phone                    String?
   address                  String?  @db.Text
   bakongAccountId          String?  @map("bakong_account_id")
+  // Admin-configurable list of banks a customer may pay via manual KHQR (e.g.
+  // ["ABA","ACLEDA","Wing"]). Served to the POS bank selector. Null/empty is
+  // coalesced to a default of ["ABA"] in the service layer.
+  paymentBanks             Json?    @map("payment_banks")
   currencySymbol           String   @default("$") @map("currency_symbol")
   exchangeRate             Decimal  @default(4100) @map("exchange_rate") @db.Decimal(10, 2)
   receiptFooter            String?  @map("receipt_footer") @db.Text
   isOrderManagementEnabled Boolean  @default(true) @map("is_order_management_enabled")
   isShopClosed             Boolean  @default(false) @map("is_shop_closed")
+  // Optional owner-authored closure notice shown in the customer Mini App when the
+  // shop is closed. Free text in any language (Khmer or English); when null/blank the
+  // Mini App falls back to the default localized notice.
+  closureMessage           String?  @map("closure_message") @db.Text
+  closureDescription       String?  @map("closure_description") @db.Text
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
@@ -207,12 +224,13 @@ model BlacklistedToken {
 // REUSABLE CATALOG OPTIONS (Templates)
 // ==========================================
 model Category {
-  id        Int      @id @default(autoincrement())
-  shopId    Int      @map("shop_id")
+  id        Int          @id @default(autoincrement())
+  shopId    Int          @map("shop_id")
   name      String
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
+  type      CategoryType @default(product)
+  isActive  Boolean      @default(true) @map("is_active")
+  sortOrder Int          @default(0) @map("sort_order")
+  createdAt DateTime     @default(now()) @map("created_at")
 
   shop        Shop                @relation(fields: [shopId], references: [id])
   products    Product[]
@@ -541,6 +559,10 @@ model Order {
 
   paymentMethod String  @map("payment_method")
   khqrString    String? @map("khqr_string") @db.Text
+  // Bank the customer used for a manual KHQR (bank transfer) payment — recorded by
+  // staff at checkout for reporting. Null for cash orders. Chosen from the shop's
+  // configurable `paymentBanks` list (see Shop.paymentBanks).
+  bankName      String? @map("bank_name")
 
   paymentStatus     OrderPaymentStatus     @map("payment_status")
   fulfillmentStatus OrderFulfillmentStatus @map("fulfillment_status")
@@ -667,4 +689,25 @@ model BlockedTelegramCustomer {
   @@unique([shopId, telegramUserId])
   @@index([shopId, telegramUserId])
   @@map("blocked_telegram_customers")
+}
+
+// A Telegram customer's profile with the ordering bot. Global (not shop-scoped)
+// because language and contact details belong to the person, not a shop, and the
+// bot's direct-message command handler has no shop context. Powers two things:
+//  - the language the bot talks to this user in (changeable via /language in the
+//    bot, or from the Mini App language toggle);
+//  - remembering the last name/phone the guest used so checkout can pre-fill them.
+model TelegramCustomer {
+  id                Int      @id @default(autoincrement())
+  telegramUserId    String   @unique @map("telegram_user_id")
+  telegramUsername  String?  @map("telegram_username")
+  // 'en' | 'kh' — matches the Mini App i18n locale codes. Defaults to English.
+  languageCode      String   @default("en") @map("language_code")
+  // Last contact details the guest submitted, reused to pre-fill the next order.
+  lastCustomerName  String?  @map("last_customer_name")
+  lastCustomerPhone String?  @map("last_customer_phone")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("telegram_customers")
 }

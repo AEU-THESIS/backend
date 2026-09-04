@@ -48,6 +48,7 @@ export const Messages = {
   ORDER_ITEM_PRICE_INVALID:
     'One or more items have an invalid price (a size or option must be selected)',
   INVALID_EXCHANGE_RATE: 'Shop exchange rate is invalid; please update it in Shop Settings',
+  INVALID_PAYMENT_BANK: 'Selected bank is not available for this shop',
   ORDERS_RETRIEVED: 'Orders retrieved successfully',
   // Void & item cancellation
   ORDER_VOIDED: 'Order voided and payment refunded',
@@ -80,9 +81,18 @@ export const Messages = {
   MENU_RETRIEVED: 'Menu retrieved successfully',
   PREORDER_CREATED: 'Your pre-order has been placed. The café will contact you shortly.',
   PREORDERS_RETRIEVED: 'Pre-orders retrieved successfully',
+  PROFILE_RETRIEVED: 'Profile retrieved successfully',
+  LANGUAGE_UPDATED: 'Language preference updated',
   TELEGRAM_AUTH_FAILED: 'Could not verify your Telegram session. Please reopen the app.',
   CUSTOMER_BLOCKED: 'You are temporarily blocked from placing orders. Please contact the café.',
   CUSTOMER_BLOCKED_ADDED: 'Customer blocked',
   CUSTOMER_BLOCK_REMOVED: 'Customer unblocked',
   SHOP_CLOSED: 'The shop is currently closed. Please check back later.',
+  // Notifications
+  NOTIFICATION_NOT_FOUND: 'Notification not found',
+  NOTIFICATIONS_RETRIEVED: 'Notifications retrieved successfully',
+  NOTIFICATION_MARKED_READ: 'Notification marked as read',
+  ALL_NOTIFICATIONS_MARKED_READ: 'All notifications marked as read',
+  NOTIFICATION_DELETED: 'Notification deleted successfully',
+  ALL_NOTIFICATIONS_CLEARED: 'All notifications cleared successfully',
 } as const

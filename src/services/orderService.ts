@@ -4,6 +4,7 @@ import type { CreatePreOrderInput } from '../validations/publicOrderValidation'
 import { telegramCustomerService } from './telegramCustomerService'
 import { Prisma } from '@prisma/client'
 import { promotionService } from './promotionService'
+import { notificationService } from './notificationService'
 import {
   cartDiscounts,
   recalcSurvivorMoney,
@@ -12,6 +13,16 @@ import {
 } from '../utils/promotionDiscount'
 import { shopDayStartUtc, shopDayEndUtc, shopDateString } from '../utils/date'
 import { round2, roundRielUp, roundRielDown } from '../utils/money'
+import { normalizePaymentBanks } from '../constants/paymentBanks'
+import { ROLES } from '../constants/roles'
+
+/**
+ * The cashier (acting staff member) attached to every order response. Kept as one
+ * constant so the list, the detail and the live-stream update all expose exactly the
+ * same shape — a client can rely on `order.user` being present (or null for an order
+ * with no recorded staff member, which the UI renders as "System").
+ */
+const cashierSelect = { id: true, name: true, employeeId: true } as const
 
 /**
  * Builds the next per-shop, per-day order number, e.g. `ORD-1-20260805-0001`.
@@ -293,6 +304,9 @@ async function performCancellation(
 export const orderService = {
   async createOrder(userId: number, shopId: number, payload: CreateOrderInput) {
     const { orderType, paymentMethod, paymentCurrency, receivedAmount, items } = payload
+    // Bank is only meaningful for a manual KHQR payment; never store one against a
+    // cash order even if a stray value slips through.
+    const bankName = paymentMethod === 'khqr' ? (payload.bankName ?? null) : null
 
     // ── 1. Validate all products belong to this shop ──────────────────
     const productIds = items.map(i => i.productId)
@@ -464,11 +478,26 @@ export const orderService = {
     // configured rate and a customer can never underpay with a forged rate.
     const shop = await prisma.shop.findUnique({
       where: { id: shopId },
-      select: { exchangeRate: true, isOrderManagementEnabled: true },
+      select: { exchangeRate: true, isOrderManagementEnabled: true, paymentBanks: true },
     })
 
     if (!shop) {
       throw new AppError(Messages.SHOP_NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    // A manual KHQR bank must be one the shop actually configured — never trust the
+    // client's value, so a forged or stale request can't attribute a sale to an
+    // arbitrary bank and pollute the reports. Match case-insensitively and persist the
+    // shop's canonical spelling.
+    let resolvedBankName = bankName
+    if (paymentMethod === 'khqr') {
+      const configuredBanks = normalizePaymentBanks(shop.paymentBanks)
+      const target = (bankName ?? '').trim().toLowerCase()
+      const match = configuredBanks.find(b => b.toLowerCase() === target)
+      if (!match) {
+        throw new AppError(Messages.INVALID_PAYMENT_BANK, HttpStatus.BAD_REQUEST)
+      }
+      resolvedBankName = match
     }
 
     const exchangeRate = Number(shop.exchangeRate)
@@ -555,6 +584,7 @@ export const orderService = {
             // exactly even if the shop later changes its exchange rate.
             exchangeRateSnapshot: exchangeRate,
             paymentMethod,
+            bankName: resolvedBankName,
             // A fully-comp order is `comp` (excluded from paid-only sales queries);
             // otherwise it is a normal paid sale — a mixed order (paid + comp lines)
             // still charges for the paid items and stays `paid`.
@@ -627,6 +657,10 @@ export const orderService = {
       paymentCurrency,
       changeAmount,
       exchangeRateSnapshot: exchangeRate,
+      // Echo the payment method + bank so the checkout-success receipt can show
+      // "Paid via KHQR — ABA" without a follow-up fetch.
+      paymentMethod: order.paymentMethod,
+      bankName: order.bankName,
       paymentStatus: order.paymentStatus,
       fulfillmentStatus: order.fulfillmentStatus,
     }
@@ -643,9 +677,16 @@ export const orderService = {
       search?: string
       startDate?: string
       endDate?: string
+      // Restrict to the orders taken by one cashier. Cashiers are clamped to their
+      // own id by the caller (see the actor argument) so the filter can never be
+      // used to read a colleague's sales.
+      userId?: number
       page?: number
       limit?: number
-    }
+    },
+    // Who is asking. A Cashier may only ever filter by their own id; Admins and
+    // Managers may filter by any staff member (or none, for the whole shop).
+    actor?: { userId: number; role: string | null }
   ) {
     const {
       status,
@@ -656,6 +697,7 @@ export const orderService = {
       search,
       startDate,
       endDate,
+      userId,
       page = 1,
       limit = 50,
     } = filters
@@ -692,6 +734,16 @@ export const orderService = {
     // Order-origin filter (e.g. pre_order for the Pre-Orders board).
     if (orderType) {
       whereClause.orderType = orderType
+    }
+
+    // Cashier filter. A Cashier asking for a specific cashier's orders is forced back
+    // onto their own id, so "show me my sales" works while another cashier's takings
+    // stay out of reach. Admins/Managers may filter by anyone. Omitting the filter
+    // still returns the whole shop for every role (the kitchen board needs that).
+    const cashierFilterId =
+      actor?.role === ROLES.CASHIER ? (userId === undefined ? undefined : actor.userId) : userId
+    if (cashierFilterId !== undefined) {
+      whereClause.userId = cashierFilterId
     }
 
     // "Free items only" reconciliation filter — restrict to orders carrying at least
@@ -763,12 +815,16 @@ export const orderService = {
         skip,
         take: limit,
         include: {
+          // The cashier who took the order — every list row shows their name.
+          user: { select: cashierSelect },
           items: {
             include: {
               product: true,
               options: true,
             },
           },
+          // Staff member who rang the order up. Null for guest pre-orders placed
+          // through the Telegram Mini App, which carry no `userId`.
           promotion: {
             select: { id: true, name: true, discountType: true, discountValue: true },
           },
@@ -801,12 +857,16 @@ export const orderService = {
         shopId,
       },
       include: {
+        // The cashier who took the order (shown in the detail panel's info block).
+        user: { select: cashierSelect },
         items: {
           include: {
             product: true,
             options: true,
           },
         },
+        // Staff member who rang the order up. Null for guest pre-orders placed
+        // through the Telegram Mini App, which carry no `userId`.
         promotion: {
           select: { id: true, name: true, discountType: true, discountValue: true },
         },
@@ -904,6 +964,9 @@ export const orderService = {
           ...settleOnComplete,
         },
         include: {
+          // Keep the live-stream payload shape in step with the list/detail responses
+          // so a board row refreshed over SSE keeps showing its cashier.
+          user: { select: cashierSelect },
           items: {
             include: {
               product: true,
@@ -1218,6 +1281,25 @@ export const orderService = {
         return createdOrder
       })
     )
+
+    // Notify staff screens of incoming pre-order
+    const itemSummary =
+      validatedItemsList
+        .map(v => `${v.quantity}x ${productMap.get(v.productId)?.name ?? 'Item'}`)
+        .join(', ') || 'Customer pre-order'
+
+    void notificationService
+      .createNotification(shopId, 'new_pre_order', 'order', order.id, {
+        title: `New Pre-Order #${order.orderNumber}`,
+        description: itemSummary,
+        orderNumber: order.orderNumber,
+        totalAmount: netTotal,
+        customerName: customerName || telegram.username || 'Customer',
+        navigateTo: '/orders',
+      })
+      .catch(err => {
+        console.error('⚠️ [notification] failed to create pre-order notification:', err)
+      })
 
     return {
       id: order.id,

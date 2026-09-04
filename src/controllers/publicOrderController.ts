@@ -10,7 +10,11 @@ import { AppError } from '../utils/appError'
 import { publicOrderService } from '../services/publicOrderService'
 import { orderService } from '../services/orderService'
 import { orderSseController } from './orderSseController'
-import { CreatePreOrderSchema, ShopSlugParamsSchema } from '../validations/publicOrderValidation'
+import {
+  CreatePreOrderSchema,
+  SetLanguageSchema,
+  ShopSlugParamsSchema,
+} from '../validations/publicOrderValidation'
 import prisma from '../config/database'
 import { buildPreOrderMessage, telegram } from '../utils/telegram'
 import { telegramCustomerService } from '../services/telegramCustomerService'
@@ -52,12 +56,22 @@ export const publicOrderController = {
       parsed.data
     )
 
+    // Remember the guest's contact details for faster checkout next time (best-effort).
+    telegramCustomerService
+      .rememberContact(telegramUser.id, {
+        name: parsed.data.customerName,
+        phone: parsed.data.customerPhone,
+        telegramUsername: telegramUser.username ?? null,
+      })
+      .catch(() => {})
+
     // Fire-and-forget side effects: notify staff screens (SSE) and post the
     // Telegram group alert. Neither may ever fail the customer's order.
     ;(async () => {
       try {
         const fullOrder = await orderService.getOrderById(shop.id, result.id)
         orderSseController.safeBroadcastToShop(shop.id, 'order_created', fullOrder)
+
         if (telegram.isConfigured()) {
           const { text, replyMarkup } = buildPreOrderMessage(fullOrder, shop.currencySymbol)
           const sent = await telegram.sendGroupMessage(text, replyMarkup)
@@ -104,5 +118,35 @@ export const publicOrderController = {
       Messages.PREORDERS_RETRIEVED,
       HttpStatus.OK
     )
+  }),
+
+  /**
+   * The verified guest's remembered profile — name, phone, and language — used by
+   * the Mini App to pre-fill checkout and sync the language toggle. Shop-agnostic:
+   * the profile belongs to the Telegram user, not a shop.
+   */
+  getMyProfile: catchAsync(async (req: Request, res: Response) => {
+    const telegramUser = req.telegramUser!
+    const profile = await telegramCustomerService.getProfile(telegramUser.id)
+    // Personal contact data tied to one Telegram identity — never let a shared
+    // cache serve it to another guest when the Mini App switches user.
+    res.set('Cache-Control', 'no-store')
+    return sendSuccess(res, profile, Messages.PROFILE_RETRIEVED, HttpStatus.OK)
+  }),
+
+  /** Persists the guest's language choice from the Mini App toggle. */
+  setMyLanguage: catchAsync(async (req: Request, res: Response) => {
+    const telegramUser = req.telegramUser!
+    const parsed = SetLanguageSchema.safeParse(req.body)
+    if (!parsed.success) {
+      throw new AppError(Messages.VALIDATION_ERROR, HttpStatus.BAD_REQUEST)
+    }
+
+    const language = await telegramCustomerService.setLanguage(
+      telegramUser.id,
+      parsed.data.language,
+      telegramUser.username ?? null
+    )
+    return sendSuccess(res, { language }, Messages.LANGUAGE_UPDATED, HttpStatus.OK)
   }),
 }

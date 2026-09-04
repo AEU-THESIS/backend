@@ -2,6 +2,29 @@ import { z } from 'zod'
 
 const optionalText = z.string().trim().nullable().optional()
 
+// Customer-facing closure notice: same shape as optionalText but bounded to match
+// the frontend cap (500), so a direct API caller can't store an oversized value
+// that then renders on the public closed page.
+const closureText = z.string().trim().max(500, 'Text is too long').nullable().optional()
+
+// Admin-configurable list of banks for manual KHQR payments. Trims, drops blanks, and
+// de-duplicates case-insensitively (preserving first-seen order) so the stored list is
+// always clean. An empty list is allowed here and coalesced to the default on read.
+const bankListSchema = z
+  .array(z.string().trim().min(1, 'Bank name is required').max(191, 'Bank name is too long'))
+  .max(50, 'Too many banks')
+  .transform(list => {
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const bank of list) {
+      const key = bank.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(bank)
+    }
+    return result
+  })
+
 const decimalSchema = z
   .union([
     z
@@ -43,6 +66,8 @@ export const updateShopSettingsSchema = z
     address: optionalText,
     bakongAccountId: optionalText,
     bakong_account_id: optionalText,
+    paymentBanks: bankListSchema.optional(),
+    payment_banks: bankListSchema.optional(),
     currencySymbol: z.string().trim().min(1).optional(),
     currency_symbol: z.string().trim().min(1).optional(),
     exchangeRate: decimalSchema.optional(),
@@ -53,17 +78,24 @@ export const updateShopSettingsSchema = z
     is_order_management_enabled: z.boolean().optional(),
     isShopClosed: z.boolean().optional(),
     is_shop_closed: z.boolean().optional(),
+    closureMessage: closureText,
+    closure_message: closureText,
+    closureDescription: closureText,
+    closure_description: closureText,
   })
   .strict()
   .superRefine((data, ctx) => {
     const aliasPairs = [
       ['ownerName', 'owner_name'],
       ['bakongAccountId', 'bakong_account_id'],
+      ['paymentBanks', 'payment_banks'],
       ['currencySymbol', 'currency_symbol'],
       ['exchangeRate', 'exchange_rate'],
       ['receiptFooter', 'receipt_footer'],
       ['isOrderManagementEnabled', 'is_order_management_enabled'],
       ['isShopClosed', 'is_shop_closed'],
+      ['closureMessage', 'closure_message'],
+      ['closureDescription', 'closure_description'],
     ] as const
 
     for (const [camelCaseKey, snakeCaseKey] of aliasPairs) {
@@ -88,6 +120,8 @@ export const updateShopSettingsSchema = z
     ...(data.bakong_account_id !== undefined && {
       bakongAccountId: data.bakong_account_id,
     }),
+    ...(data.paymentBanks !== undefined && { paymentBanks: data.paymentBanks }),
+    ...(data.payment_banks !== undefined && { paymentBanks: data.payment_banks }),
     ...(data.currencySymbol !== undefined && {
       currencySymbol: data.currencySymbol,
     }),
@@ -115,6 +149,18 @@ export const updateShopSettingsSchema = z
     }),
     ...(data.is_shop_closed !== undefined && {
       isShopClosed: data.is_shop_closed,
+    }),
+    ...(data.closureMessage !== undefined && {
+      closureMessage: data.closureMessage,
+    }),
+    ...(data.closure_message !== undefined && {
+      closureMessage: data.closure_message,
+    }),
+    ...(data.closureDescription !== undefined && {
+      closureDescription: data.closureDescription,
+    }),
+    ...(data.closure_description !== undefined && {
+      closureDescription: data.closure_description,
     }),
   }))
   .refine(data => Object.keys(data).length > 0, {

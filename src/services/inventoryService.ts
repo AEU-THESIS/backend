@@ -3,6 +3,7 @@ import { prisma, AppError, HttpStatus, Messages } from '../core/Service'
 import type {
   AdjustInventoryItemInput,
   CreateInventoryItemInput,
+  InventoryExpenseReportQueryInput,
   InventoryHistoryQueryInput,
   InventoryQueryInput,
   UpdateInventoryItemInput,
@@ -14,6 +15,8 @@ import {
   toDecimal,
   type DecimalLike,
 } from './inventoryCost'
+import { notificationService } from './notificationService'
+import { toShopDateString } from '../utils/date'
 
 const DEFAULT_COST_CURRENCY = '$'
 
@@ -105,6 +108,86 @@ const getCategoryId = (data: CreateInventoryItemInput | UpdateInventoryItemInput
 /** Soft-deleted items are invisible to every read path. */
 const ACTIVE = { deletedAt: null } as const
 
+/** Date range + movement type shared by the history read and its export. */
+export interface InventoryHistoryFilter {
+  from?: string
+  to?: string
+  type?: 'add' | 'remove'
+}
+
+// `baseWhere` (date range only) drives the Total In/Out summary, which stays
+// true to the whole period regardless of the type filter. `where` additionally
+// narrows by type and drives the returned rows/count/pages, so filtering to
+// "In" only changes what's listed, not the KPI totals.
+const buildHistoryWhere = (id: number, filter: InventoryHistoryFilter) => {
+  const dateFilter: { gte?: Date; lte?: Date } = {}
+  if (filter.from) dateFilter.gte = new Date(filter.from)
+  if (filter.to) dateFilter.lte = new Date(filter.to)
+
+  const baseWhere = {
+    ingredientId: id,
+    ...(dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {}),
+  }
+
+  return {
+    baseWhere,
+    where: { ...baseWhere, ...(filter.type && { transactionType: filter.type }) },
+  }
+}
+
+const HISTORY_LOG_INCLUDE = {
+  user: {
+    select: {
+      name: true,
+      // Same deterministic ordering used elsewhere, so the role is stable.
+      roles: { orderBy: { roleId: 'asc' }, include: { role: true } },
+    },
+  },
+} as const
+
+const mapHistoryLog = (log: {
+  id: number
+  transactionType: string
+  quantityChanged: Prisma.Decimal
+  unitCost: Prisma.Decimal | null
+  reason: string | null
+  createdAt: Date
+  user: { name: string; roles: { role: { name: string } }[] } | null
+}) => ({
+  id: log.id,
+  type: log.transactionType,
+  quantityChanged: serialize(log.quantityChanged),
+  unitCost: log.unitCost === null ? null : serialize(log.unitCost),
+  // Monetary value of this movement (qty x unit cost). Null when unitCost
+  // is null, same as the Unit Cost column it derives from.
+  value:
+    log.unitCost === null
+      ? null
+      : roundMoney(toDecimal(log.quantityChanged).times(toDecimal(log.unitCost))).toNumber(),
+  notes: log.reason,
+  user: log.user?.name ?? null,
+  userRole: log.user?.roles[0]?.role.name ?? null,
+  createdAt: log.createdAt,
+})
+
+const sumHistoryTotals = async (baseWhere: object) => {
+  const [addsSum, removesSum] = await Promise.all([
+    prisma.ingredientLog.aggregate({
+      where: { ...baseWhere, transactionType: 'add' },
+      _sum: { quantityChanged: true },
+    }),
+    prisma.ingredientLog.aggregate({
+      where: { ...baseWhere, transactionType: 'remove' },
+      _sum: { quantityChanged: true },
+    }),
+  ])
+
+  return {
+    totalIn: serialize(addsSum._sum.quantityChanged ?? 0),
+    totalOut: serialize(removesSum._sum.quantityChanged ?? 0),
+  }
+}
+
 const getExistingInventoryItem = async (id: number, shopId: number) => {
   const item = await prisma.ingredient.findFirst({
     where: { id, shopId, ...ACTIVE },
@@ -115,6 +198,76 @@ const getExistingInventoryItem = async (id: number, shopId: number) => {
   }
 
   return item
+}
+
+const checkAndNotifyStockStatus = async (
+  shopId: number,
+  item: {
+    id: number
+    name: string
+    unitOfMeasure: string
+    quantity: number
+    minAlertThreshold: number
+    status: string
+  }
+) => {
+  try {
+    if (item.status === 'out_of_stock') {
+      // Resolve any previous low_stock alerts for this item since it has escalated to out of stock
+      await prisma.notification.updateMany({
+        where: {
+          shopId,
+          notifiableType: { in: ['ingredient', 'Ingredient'] },
+          notifiableId: item.id,
+          type: 'low_stock',
+          readAt: null,
+        },
+        data: { readAt: new Date() },
+      })
+
+      await notificationService.createNotification(shopId, 'out_of_stock', 'ingredient', item.id, {
+        title: `Out of Stock: ${item.name}`,
+        description: `Current stock has reached 0 ${item.unitOfMeasure}`,
+        ingredientId: item.id,
+        ingredientName: item.name,
+        navigateTo: '/inventory',
+      })
+    } else if (item.status === 'low_stock') {
+      // Resolve any previous out_of_stock alerts for this item if it was partially restocked to low stock
+      await prisma.notification.updateMany({
+        where: {
+          shopId,
+          notifiableType: { in: ['ingredient', 'Ingredient'] },
+          notifiableId: item.id,
+          type: 'out_of_stock',
+          readAt: null,
+        },
+        data: { readAt: new Date() },
+      })
+
+      await notificationService.createNotification(shopId, 'low_stock', 'ingredient', item.id, {
+        title: `Low Stock: ${item.name}`,
+        description: `Only ${item.quantity} ${item.unitOfMeasure} remaining (threshold: ${item.minAlertThreshold})`,
+        ingredientId: item.id,
+        ingredientName: item.name,
+        targetRole: 'Admin',
+        navigateTo: '/inventory',
+      })
+    } else if (item.status === 'in_stock') {
+      // Item is healthy again: auto-resolve any unread stock warnings for this item
+      await prisma.notification.updateMany({
+        where: {
+          shopId,
+          notifiableType: { in: ['ingredient', 'Ingredient'] },
+          notifiableId: item.id,
+          readAt: null,
+        },
+        data: { readAt: new Date() },
+      })
+    }
+  } catch (err) {
+    console.error('⚠️ [notification] checkAndNotifyStockStatus failed:', err)
+  }
 }
 
 export const inventoryService = {
@@ -188,7 +341,9 @@ export const inventoryService = {
       return created
     })
 
-    return mapInventoryItem(item)
+    const mapped = mapInventoryItem(item)
+    await checkAndNotifyStockStatus(shopId, mapped)
+    return mapped
   },
 
   async update(id: number, shopId: number, data: UpdateInventoryItemInput, imageUrl?: string) {
@@ -229,7 +384,9 @@ export const inventoryService = {
       include: { category: CATEGORY_SELECT },
     })
 
-    return mapInventoryItem(item)
+    const mapped = mapInventoryItem(item)
+    await checkAndNotifyStockStatus(shopId, mapped)
+    return mapped
   },
 
   async delete(id: number, shopId: number) {
@@ -246,7 +403,7 @@ export const inventoryService = {
   },
 
   async adjust(id: number, shopId: number, userId: number, data: AdjustInventoryItemInput) {
-    return prisma.$transaction(async tx => {
+    const result = await prisma.$transaction(async tx => {
       // The weighted average is computed in application code from the row's
       // current stock and cost, so a plain read would let two concurrent
       // stock-ins both work from the pre-update snapshot: the increments would
@@ -322,6 +479,9 @@ export const inventoryService = {
 
       return mapInventoryItem(updatedItem)
     })
+
+    await checkAndNotifyStockStatus(shopId, result)
+    return result
   },
 
   // Shop-wide valuation of the whole inventory, independent of any list filters,
@@ -351,68 +511,181 @@ export const inventoryService = {
     await getExistingInventoryItem(id, shopId)
 
     const { page, limit } = query
-    const dateFilter: { gte?: Date; lte?: Date } = {}
-    if (query.from) dateFilter.gte = new Date(query.from)
-    if (query.to) dateFilter.lte = new Date(query.to)
-    const where = {
-      ingredientId: id,
-      ...(dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {}),
-    }
+    const { baseWhere, where } = buildHistoryWhere(id, query)
 
-    const [total, addsSum, removesSum, logs] = await Promise.all([
+    const [total, totals, logs] = await Promise.all([
       prisma.ingredientLog.count({ where }),
-      prisma.ingredientLog.aggregate({
-        where: { ...where, transactionType: 'add' },
-        _sum: { quantityChanged: true },
-      }),
-      prisma.ingredientLog.aggregate({
-        where: { ...where, transactionType: 'remove' },
-        _sum: { quantityChanged: true },
-      }),
+      sumHistoryTotals(baseWhere),
       prisma.ingredientLog.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: {
-          user: {
-            select: {
-              name: true,
-              // Same deterministic ordering used elsewhere, so the role is stable.
-              roles: { orderBy: { roleId: 'asc' }, include: { role: true } },
-            },
-          },
-        },
+        include: HISTORY_LOG_INCLUDE,
       }),
     ])
 
     return {
-      items: logs.map(log => ({
-        id: log.id,
-        type: log.transactionType,
-        quantityChanged: serialize(log.quantityChanged),
-        unitCost: log.unitCost === null ? null : serialize(log.unitCost),
-        // Monetary value of this movement (qty x unit cost). Null when unitCost
-        // is null, same as the Unit Cost column it derives from.
-        value:
-          log.unitCost === null
-            ? null
-            : roundMoney(toDecimal(log.quantityChanged).times(toDecimal(log.unitCost))).toNumber(),
-        notes: log.reason,
-        user: log.user?.name ?? null,
-        userRole: log.user?.roles[0]?.role.name ?? null,
-        createdAt: log.createdAt,
-      })),
+      items: logs.map(mapHistoryLog),
       pagination: {
         total,
         page,
         limit,
         totalPages: Math.max(1, Math.ceil(total / limit)),
       },
-      totals: {
-        totalIn: serialize(addsSum._sum.quantityChanged ?? 0),
-        totalOut: serialize(removesSum._sum.quantityChanged ?? 0),
-      },
+      totals,
     }
+  },
+
+  /** A single item by id, scoped to the shop. Throws 404 when it doesn't exist. */
+  async getById(id: number, shopId: number) {
+    const item = await prisma.ingredient.findFirst({
+      where: { id, shopId, ...ACTIVE },
+      include: { category: CATEGORY_SELECT },
+    })
+
+    if (!item) {
+      throw new AppError(Messages.NOT_FOUND, HttpStatus.NOT_FOUND)
+    }
+
+    return mapInventoryItem(item)
+  },
+
+  /**
+   * Every movement in the range, unpaginated — the Excel export needs the whole
+   * period in one workbook, where the on-screen table only ever shows a page.
+   * Same filtering and ordering as `getHistory`, so the file matches the table.
+   */
+  async getHistoryForExport(id: number, shopId: number, filter: InventoryHistoryFilter) {
+    await getExistingInventoryItem(id, shopId)
+
+    const { baseWhere, where } = buildHistoryWhere(id, filter)
+    const [totals, logs] = await Promise.all([
+      sumHistoryTotals(baseWhere),
+      prisma.ingredientLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: HISTORY_LOG_INCLUDE,
+      }),
+    ])
+
+    return { items: logs.map(mapHistoryLog), totals }
+  },
+
+  // Purchase spend over a date range — how much was spent restocking, not
+  // profit or cost of goods sold. Only stock-in ('add') logs count: removals
+  // are consumption, not spend. Reuses the exact same quantity x unitCost
+  // figure the history endpoint reports as `value`, so the two always agree
+  // for the same range. Grouped by day (chart) or by ingredient (breakdown
+  // table) per the caller's request — bucketing by day uses the shop's own
+  // calendar, not the server's, so a late-night purchase lands on the café's
+  // calendar day rather than shifting to the next one.
+  async getExpenseReport(shopId: number, query: InventoryExpenseReportQueryInput) {
+    const start = new Date(query.startDate)
+    const end = new Date(query.endDate)
+
+    const logs = await prisma.ingredientLog.findMany({
+      where: {
+        transactionType: 'add',
+        createdAt: { gte: start, lte: end },
+        ingredient: { shopId },
+      },
+      select: {
+        createdAt: true,
+        quantityChanged: true,
+        unitCost: true,
+        ingredientId: true,
+        ingredient: { select: { name: true, unitOfMeasure: true, costCurrency: true } },
+      },
+    })
+
+    const spendOf = (log: { quantityChanged: Prisma.Decimal; unitCost: Prisma.Decimal | null }) =>
+      toDecimal(log.quantityChanged).times(toDecimal(log.unitCost ?? 0))
+
+    const totalSpend = logs.reduce((sum, log) => sum.plus(spendOf(log)), toDecimal(0))
+    const shop = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: { currencySymbol: true },
+    })
+    const currency =
+      logs[0]?.ingredient.costCurrency || shop?.currencySymbol || DEFAULT_COST_CURRENCY
+
+    const period = { startDate: start.toISOString(), endDate: end.toISOString() }
+    const base = {
+      period,
+      totalSpend: roundMoney(totalSpend).toNumber(),
+      purchaseCount: logs.length,
+      currency,
+    }
+
+    if (query.groupBy === 'raw') {
+      // `date` is the shop-local calendar day (not the raw UTC instant), so a
+      // purchase logged just after UTC midnight lands on the same day — and
+      // month — as the shop's own "day" grouping reports it under.
+      const data = [...logs]
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map(log => ({
+          date: toShopDateString(log.createdAt),
+          ingredientId: log.ingredientId,
+          name: log.ingredient.name,
+          unitOfMeasure: log.ingredient.unitOfMeasure,
+          quantity: serialize(log.quantityChanged),
+          unitCost: serialize(log.unitCost ?? 0),
+          totalCost: roundMoney(spendOf(log)).toNumber(),
+        }))
+
+      return { ...base, groupBy: 'raw' as const, data }
+    }
+
+    if (query.groupBy === 'ingredient') {
+      const byIngredient = new Map<
+        number,
+        {
+          name: string
+          unitOfMeasure: string
+          quantity: Prisma.Decimal
+          totalSpend: Prisma.Decimal
+        }
+      >()
+
+      for (const log of logs) {
+        const existing = byIngredient.get(log.ingredientId) ?? {
+          name: log.ingredient.name,
+          unitOfMeasure: log.ingredient.unitOfMeasure,
+          quantity: toDecimal(0),
+          totalSpend: toDecimal(0),
+        }
+        existing.quantity = existing.quantity.plus(toDecimal(log.quantityChanged))
+        existing.totalSpend = existing.totalSpend.plus(spendOf(log))
+        byIngredient.set(log.ingredientId, existing)
+      }
+
+      const data = Array.from(byIngredient.entries())
+        .map(([ingredientId, row]) => ({
+          ingredientId,
+          name: row.name,
+          unitOfMeasure: row.unitOfMeasure,
+          quantity: serialize(row.quantity),
+          totalSpend: roundMoney(row.totalSpend).toNumber(),
+        }))
+        .sort((a, b) => b.totalSpend - a.totalSpend)
+
+      return { ...base, groupBy: 'ingredient' as const, data }
+    }
+
+    const byDay = new Map<string, Prisma.Decimal>()
+    for (const log of logs) {
+      const dateKey = toShopDateString(log.createdAt)
+      byDay.set(dateKey, (byDay.get(dateKey) ?? toDecimal(0)).plus(spendOf(log)))
+    }
+
+    const data = Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, spend]) => {
+        const [, month, day] = date.split('-').map(Number)
+        return { date, label: `${month}/${day}`, totalSpend: roundMoney(spend).toNumber() }
+      })
+
+    return { ...base, groupBy: 'day' as const, data }
   },
 }

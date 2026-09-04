@@ -17,6 +17,11 @@ router.use(requireRoles([ROLES.ADMIN, ROLES.MANAGER]))
 
 router.get('/', inventoryController.getAll)
 router.get('/valuations', inventoryController.getValuation)
+router.get('/expense-report', inventoryController.getExpenseReport)
+// Excel downloads. Registered before the `/:id` routes so a literal `exports`
+// segment can never be read as an item id.
+router.get('/exports/expense-report', inventoryController.exportExpenseReport)
+router.get('/exports/history/:id', inventoryController.exportHistory)
 router.post('/', upload.single('image'), inventoryController.create)
 router.put('/:id', upload.single('image'), inventoryController.update)
 router.delete('/:id', inventoryController.delete)
